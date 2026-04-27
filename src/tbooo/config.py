@@ -113,6 +113,10 @@ class Config:
     def sgdp_pvcf(self, chrom: str) -> Path:
         return self.sgdp_raw_dir() / "pvcf" / f"sgdp_c{chrom}.pvcf.gz"
 
+    def nygc_pvcf(self, chrom: str) -> Path:
+        """Intermediate per-chromosome NYGC pVCF (EID-reheadered, before merging with SGDP)."""
+        return self.kg_raw_dir() / "pvcf" / f"nygc_c{chrom}.pvcf.gz"
+
     def phase3_vcf(self, chrom: str) -> Path:
         date = self.kg_phase3_release_date
         ver = self.kg_phase3_vcf_version

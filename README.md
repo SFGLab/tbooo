@@ -140,9 +140,9 @@ tbooo map eids
 # Build each data layer
 tbooo map array       # Phase 3 VCF → PLINK (Field 22418, GRCh37)
 tbooo map imputed     # Phase 3 VCF → BGEN  (Field 22828, GRCh37)
-tbooo map wgs                             # NYGC CRAMs → renamed; NYGC VCF → 1KGP pVCF (Fields 23149/23370, GRCh38)
-tbooo map wgs --sgdp-gvcf                 # symlink SGDP per-sample VCFs as Field 23151 gVCFs
-tbooo map wgs --sgdp-gvcf --sgdp-pvcf    # also merge SGDP VCFs into per-chromosome population pVCF
+tbooo map wgs               # rename 1KGP CRAMs + build merged pVCF (NYGC+SGDP → Field 23370)
+tbooo map wgs --gvcf        # also extract per-sample gVCFs from NYGC + SGDP (Field 23151)
+tbooo map wgs --no-pvcf     # CRAMs only (skip pVCF build)
 tbooo map wes         # NYGC VCF ∩ exome BED → PLINK + BGEN (Field 23157, GRCh38)
 tbooo map phenotypes  # EID maps → Parquet with UKB column naming (p<FIELD>_i<INST>_a<ARR>)
 tbooo map qc          # PLINK --het + KING → ukb_sqc_v2.txt + ukb_rel.txt

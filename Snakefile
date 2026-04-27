@@ -240,28 +240,7 @@ rule imputed_chrom:
     shell:
         "tbooo --config config.yaml map imputed --chroms {wildcards.chrom}"
 
-# ── WGS pVCF ─────────────────────────────────────────────────────────────────
-
-rule wgs_pvcf_chrom:
-    input:
-        vcf    = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chr{{chrom}}.filtered.shapeit2-duohmm-phased.vcf.gz",
-        rename = f"{META}/vcf_sample_rename_1kg.txt",
-    output:
-        pvcf  = f"{WGS_DIR}/ukb23370_c{{chrom}}_b0_v1.pvcf.gz",
-        index = f"{WGS_DIR}/ukb23370_c{{chrom}}_b0_v1.pvcf.gz.tbi",
-    shell:
-        "tbooo --config config.yaml map wgs --no-croms --chroms {wildcards.chrom}"
-
-rule wgs_crams:
-    input:
-        kg_map   = f"{META}/eid_map_1kg.tsv",
-    output:
-        flag = f"{META}/.crams_linked",
-    shell:
-        """
-        tbooo --config config.yaml map wgs --no-pvcf
-        touch {output.flag}
-        """
+# ── WGS outputs ───────────────────────────────────────────────────────────────
 
 rule download_sgdp:
     output:
@@ -273,27 +252,43 @@ rule download_sgdp:
         touch {output.vcf_flag}
         """
 
-rule sgdp_gvcfs:
+rule wgs_crams:
     input:
-        vcf_flag = f"{SGDP_RAW}/vcf/.downloaded",
-        eid_map  = f"{META}/eid_map_sgdp.tsv",
+        kg_map = f"{META}/eid_map_1kg.tsv",
     output:
-        flag = f"{META}/.sgdp_gvcfs_linked",
+        flag = f"{META}/.crams_linked",
     shell:
         """
-        tbooo --config config.yaml map wgs --no-croms --no-pvcf --sgdp-gvcf
+        tbooo --config config.yaml map wgs --no-pvcf
         touch {output.flag}
         """
 
-rule sgdp_pvcf_chrom:
+rule wgs_gvcfs:
+    # Per-sample gVCFs from NYGC (extracted) + SGDP (symlinked) → Field 23151
     input:
-        vcf_flag  = f"{SGDP_RAW}/vcf/.downloaded",
-        rename    = f"{META}/vcf_sample_rename_sgdp.txt",
+        kg_rename   = f"{META}/vcf_sample_rename_1kg.txt",
+        sgdp_rename = f"{META}/vcf_sample_rename_sgdp.txt",
+        vcf_flag    = f"{SGDP_RAW}/vcf/.downloaded",
     output:
-        pvcf  = f"{SGDP_RAW}/pvcf/sgdp_c{{chrom}}.pvcf.gz",
-        index = f"{SGDP_RAW}/pvcf/sgdp_c{{chrom}}.pvcf.gz.tbi",
+        flag = f"{META}/.gvcfs_built",
     shell:
-        "tbooo --config config.yaml map wgs --no-croms --no-pvcf --sgdp-pvcf --chroms {wildcards.chrom}"
+        """
+        tbooo --config config.yaml map wgs --no-croms --no-pvcf --gvcf --chroms {",".join(CHROMS)}
+        touch {output.flag}
+        """
+
+rule wgs_pvcf_chrom:
+    # Combined pVCF (NYGC + SGDP merged) → Field 23370
+    input:
+        nygc_vcf  = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chr{{chrom}}.filtered.shapeit2-duohmm-phased.vcf.gz",
+        vcf_flag  = f"{SGDP_RAW}/vcf/.downloaded",
+        kg_rename = f"{META}/vcf_sample_rename_1kg.txt",
+        sg_rename = f"{META}/vcf_sample_rename_sgdp.txt",
+    output:
+        pvcf  = f"{WGS_DIR}/ukb23370_c{{chrom}}_b0_v1.pvcf.gz",
+        index = f"{WGS_DIR}/ukb23370_c{{chrom}}_b0_v1.pvcf.gz.tbi",
+    shell:
+        "tbooo --config config.yaml map wgs --no-croms --no-gvcf --chroms {wildcards.chrom}"
 
 # ── WES pipeline ─────────────────────────────────────────────────────────────
 

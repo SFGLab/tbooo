@@ -1,21 +1,16 @@
-"""Build UKB-mirrored WGS data (Fields 23149, 23151, 23370) and SGDP per-chromosome pVCFs.
+"""Build UKB-mirrored WGS data (Fields 23149, 23151, 23370).
 
 Individual CRAMs (Field 23149):
-  - Rename/symlink 1KGP NYGC 30x CRAMs to <EID>_23149_0_0.cram
-  - Place in EID-prefix subfolders under data/Bulk/Whole genome sequences/
+  - Rename/symlink 1KGP NYGC 30x CRAMs → <EID>_23149_0_0.cram
 
-Individual gVCFs (Field 23151):
-  - Symlink SGDP per-sample VCFs to <EID>_23151_0_0.g.vcf.gz
-  - Same EID-prefix subdirectory layout as CRAMs
+Per-sample gVCFs (Field 23151) — both cohorts:
+  - 1KGP: extract per-sample VCF from NYGC 30x cohort VCFs → <EID>_23151_0_0.g.vcf.gz
+  - SGDP: symlink downloaded per-sample VCFs        → <EID>_23151_0_0.g.vcf.gz
 
-1KGP cohort pVCF (Field 23370):
-  - Reheader NYGC 30x per-chromosome VCFs, replacing sample IDs with EIDs
-  - Output: data/Bulk/Whole genome sequences/ukb23370_c{chrom}_b0_v1.pvcf.gz
-
-SGDP per-chromosome pVCF:
-  - Merge per-sample SGDP VCFs (data/raw/sgdp/vcf/) by chromosome
-  - Reheader with EIDs
-  - Output: data/raw/sgdp/pvcf/sgdp_c{chrom}.pvcf.gz
+Cohort pVCF (Field 23370) — both cohorts merged:
+  - 1KGP: reheader NYGC per-chromosome VCF with EIDs → raw/1kg/pvcf/nygc_c{chrom}.pvcf.gz
+  - SGDP: merge per-sample VCFs by chromosome        → raw/sgdp/pvcf/sgdp_c{chrom}.pvcf.gz
+  - Combined: bcftools merge nygc + sgdp             → Bulk/Whole genome sequences/ukb23370_c{chrom}_b0_v1.pvcf.gz
 """
 
 from __future__ import annotations
@@ -28,6 +23,8 @@ from tbooo.config import Config
 from tbooo.utils import ensure_dirs, eid_prefix_dir, log, run
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
+
 def rename_crams(cfg: Config) -> None:
     """Symlink 1KGP NYGC 30x CRAMs into the UKB-mirrored individual-file structure."""
     ensure_dirs(cfg.wgs_dir())
@@ -36,46 +33,96 @@ def rename_crams(cfg: Config) -> None:
     log("CRAM renaming complete.")
 
 
+def build_gvcfs(cfg: Config, chroms: list[str]) -> None:
+    """Build per-sample gVCFs (Field 23151) from both NYGC and SGDP.
+
+    1KGP: extracts each sample from NYGC 30x cohort VCFs and concatenates chromosomes.
+    SGDP: symlinks downloaded per-sample VCFs directly.
+    """
+    _build_nygc_gvcfs(cfg, chroms)
+    _symlink_sgdp_gvcfs(cfg)
+    log("gVCF build complete.")
+
+
 def build_pvcf(cfg: Config, chroms: list[str]) -> None:
-    """Reheader NYGC 30x VCFs with EIDs and write as cohort pVCF."""
-    ensure_dirs(cfg.wgs_dir())
-    rename_file = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
+    """Build cohort pVCF (Field 23370) by merging NYGC and SGDP per-chromosome VCFs.
 
-    if not rename_file.exists():
-        raise FileNotFoundError(
-            f"Sample rename file not found: {rename_file}\nRun `tbooo map eids` first."
-        )
-
-    for chrom in chroms:
-        log(f"[wgs pVCF] chromosome {chrom}")
-        src = cfg.nygc_vcf(chrom)
-        if not src.exists():
-            log(f"  SKIP: NYGC VCF not found: {src}")
-            continue
-
-        out = cfg.wgs_pvcf(chrom)
-        if out.exists():
-            log(f"  skip (exists): {out.name}")
-            continue
-
-        run([
-            cfg.tools.bcftools, "reheader",
-            "--samples", str(rename_file),
-            "--output", str(out),
-            str(src),
-        ])
-        run([cfg.tools.bcftools, "index", "--tbi", str(out)])
-        log(f"  done → {out.name}")
-
+    Produces two intermediates (nygc_pvcf, sgdp_pvcf) then merges into the
+    final UKB-mirrored output.  Either intermediate is used alone if the other
+    is absent (e.g. SGDP VCFs not yet downloaded).
+    """
+    _build_nygc_pvcf(cfg, chroms)
+    _build_sgdp_pvcf(cfg, chroms)
+    _merge_pvcfs(cfg, chroms)
     log("pVCF build complete.")
 
 
-def symlink_sgdp_gvcfs(cfg: Config) -> None:
-    """Symlink SGDP per-sample VCFs into the UKB-mirrored gVCF structure (Field 23151).
+# ── gVCF internals ────────────────────────────────────────────────────────────
 
-    Each downloaded <accession>.vcf.gz becomes:
-        data/Bulk/Whole genome sequences/<EID_prefix>/<EID>_23151_0_0.g.vcf.gz
-    """
+def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
+    kg_map = _load_eid_map(cfg, "eid_map_1kg.tsv")
+    if kg_map.empty:
+        log("  WARNING: 1KGP EID map not found; skipping NYGC gVCF extraction.")
+        return
+
+    avail = [(c, cfg.nygc_vcf(c)) for c in chroms if cfg.nygc_vcf(c).exists()]
+    if not avail:
+        log("  No NYGC VCFs found; skipping per-sample gVCF extraction.")
+        return
+
+    ensure_dirs(cfg.tmp_dir)
+    log(f"[nygc gVCF] extracting {len(kg_map)} samples from {len(avail)} chromosome(s)…")
+
+    for _, row in kg_map.iterrows():
+        eid = int(row["eid"])
+        sample_id = row["sample_id"]
+
+        dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)
+        ensure_dirs(dest_dir)
+        dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
+
+        if dest_vcf.exists():
+            continue
+
+        # Per-chromosome extraction
+        tmp_chroms: list[Path] = []
+        for chrom, src in avail:
+            tmp = cfg.tmp_dir / f"nygc_{eid}_chr{chrom}.vcf.gz"
+            run([cfg.tools.bcftools, "view", "--samples", sample_id,
+                 "--output-type", "z", "--output", str(tmp), str(src)])
+            run([cfg.tools.bcftools, "index", "--tbi", str(tmp)])
+            tmp_chroms.append(tmp)
+
+        # Concatenate chromosomes
+        if len(tmp_chroms) == 1:
+            tmp_all = tmp_chroms[0]
+        else:
+            tmp_all = cfg.tmp_dir / f"nygc_{eid}_concat.vcf.gz"
+            run([cfg.tools.bcftools, "concat", "--output-type", "z",
+                 "--output", str(tmp_all)] + [str(t) for t in tmp_chroms])
+            run([cfg.tools.bcftools, "index", "--tbi", str(tmp_all)])
+
+        # Reheader: original sample ID → EID
+        rename_tmp = cfg.tmp_dir / f"rename_{eid}.txt"
+        rename_tmp.write_text(f"{sample_id}\t{eid}\n")
+        run([cfg.tools.bcftools, "reheader", "--samples", str(rename_tmp),
+             "--output", str(dest_vcf), str(tmp_all)])
+        run([cfg.tools.bcftools, "index", "--tbi", str(dest_vcf)])
+
+        for t in tmp_chroms:
+            t.unlink(missing_ok=True)
+            Path(str(t) + ".tbi").unlink(missing_ok=True)
+        if tmp_all not in tmp_chroms:
+            tmp_all.unlink(missing_ok=True)
+            Path(str(tmp_all) + ".tbi").unlink(missing_ok=True)
+        rename_tmp.unlink(missing_ok=True)
+
+        log(f"  → {dest_vcf.name}")
+
+    log("NYGC gVCF extraction complete.")
+
+
+def _symlink_sgdp_gvcfs(cfg: Config) -> None:
     vcf_dir = cfg.sgdp_vcf_dir()
     if not vcf_dir.exists() or not any(vcf_dir.glob("*.vcf.gz")):
         log("  No SGDP VCF files found; skipping. Run `tbooo download sgdp` first.")
@@ -98,10 +145,8 @@ def symlink_sgdp_gvcfs(cfg: Config) -> None:
         src_vcf = matches[0].resolve()
         src_tbi = Path(str(src_vcf) + ".tbi")
 
-        prefix = eid_prefix_dir(eid)
-        dest_dir = cfg.wgs_dir() / prefix
+        dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)
         ensure_dirs(dest_dir)
-
         dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
         dest_tbi = dest_dir / f"{eid}_23151_0_0.g.vcf.gz.tbi"
 
@@ -111,23 +156,49 @@ def symlink_sgdp_gvcfs(cfg: Config) -> None:
         if not dest_tbi.exists() and src_tbi.exists():
             dest_tbi.symlink_to(src_tbi)
 
-    log(f"  linked {linked} gVCF(s) → {cfg.wgs_dir()}/")
-    log("SGDP gVCF symlinking complete.")
+    log(f"  linked {linked} SGDP gVCF(s) → {cfg.wgs_dir()}/")
 
 
-def build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
-    """Merge per-sample SGDP VCFs into per-chromosome multi-sample pVCFs with EID renaming."""
+# ── pVCF internals ────────────────────────────────────────────────────────────
+
+def _build_nygc_pvcf(cfg: Config, chroms: list[str]) -> None:
+    rename_file = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
+    if not rename_file.exists():
+        log("  WARNING: 1KGP rename file not found; skipping NYGC pVCF. Run `tbooo map eids` first.")
+        return
+
+    pvcf_dir = cfg.kg_raw_dir() / "pvcf"
+    ensure_dirs(pvcf_dir)
+
+    for chrom in chroms:
+        out = cfg.nygc_pvcf(chrom)
+        if out.exists():
+            log(f"  skip (exists): {out.name}")
+            continue
+
+        src = cfg.nygc_vcf(chrom)
+        if not src.exists():
+            log(f"  SKIP: NYGC VCF not found: {src.name}")
+            continue
+
+        log(f"  [nygc pVCF] chr{chrom}")
+        run([cfg.tools.bcftools, "reheader", "--samples", str(rename_file),
+             "--output", str(out), str(src)])
+        run([cfg.tools.bcftools, "index", "--tbi", str(out)])
+        log(f"    → {out.name}")
+
+
+def _build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
     vcf_dir = cfg.sgdp_vcf_dir()
     sample_vcfs = sorted(vcf_dir.glob("*.vcf.gz")) if vcf_dir.exists() else []
     if not sample_vcfs:
-        log("  No SGDP VCF files found; skipping. Run `tbooo download sgdp` first.")
+        log("  No SGDP VCF files found; skipping SGDP pVCF. Run `tbooo download sgdp` first.")
         return
 
     rename_file = cfg.metadata_dir() / "vcf_sample_rename_sgdp.txt"
     if not rename_file.exists():
-        raise FileNotFoundError(
-            f"SGDP rename file not found: {rename_file}\nRun `tbooo map eids` first."
-        )
+        log("  WARNING: SGDP rename file not found; skipping. Run `tbooo map eids` first.")
+        return
 
     pvcf_dir = cfg.sgdp_raw_dir() / "pvcf"
     ensure_dirs(pvcf_dir)
@@ -140,18 +211,13 @@ def build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
             log(f"  skip (exists): {out.name}")
             continue
 
-        log(f"  chromosome {chrom}")
+        log(f"  [sgdp pVCF] chr{chrom}")
         tmp_per_sample: list[Path] = []
 
         for vcf in sample_vcfs:
             tmp = cfg.tmp_dir / f"sgdp_{vcf.stem}_chr{chrom}.vcf.gz"
-            run([
-                cfg.tools.bcftools, "view",
-                "--regions", chrom,
-                "--output-type", "z",
-                "--output", str(tmp),
-                str(vcf),
-            ])
+            run([cfg.tools.bcftools, "view", "--regions", chrom,
+                 "--output-type", "z", "--output", str(tmp), str(vcf)])
             run([cfg.tools.bcftools, "index", "--tbi", str(tmp)])
             tmp_per_sample.append(tmp)
 
@@ -159,19 +225,12 @@ def build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
             tmp_merged = tmp_per_sample[0]
         else:
             tmp_merged = cfg.tmp_dir / f"sgdp_merged_chr{chrom}.vcf.gz"
-            run([
-                cfg.tools.bcftools, "merge",
-                "--output-type", "z",
-                "--output", str(tmp_merged),
-            ] + [str(v) for v in tmp_per_sample])
+            run([cfg.tools.bcftools, "merge", "--output-type", "z",
+                 "--output", str(tmp_merged)] + [str(v) for v in tmp_per_sample])
             run([cfg.tools.bcftools, "index", "--tbi", str(tmp_merged)])
 
-        run([
-            cfg.tools.bcftools, "reheader",
-            "--samples", str(rename_file),
-            "--output", str(out),
-            str(tmp_merged),
-        ])
+        run([cfg.tools.bcftools, "reheader", "--samples", str(rename_file),
+             "--output", str(out), str(tmp_merged)])
         run([cfg.tools.bcftools, "index", "--tbi", str(out)])
 
         for tmp in tmp_per_sample:
@@ -181,12 +240,45 @@ def build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
             tmp_merged.unlink(missing_ok=True)
             Path(str(tmp_merged) + ".tbi").unlink(missing_ok=True)
 
-        log(f"  done → {out.name}")
-
-    log("SGDP pVCF build complete.")
+        log(f"    → {out.name}")
 
 
-# ── Internals ─────────────────────────────────────────────────────────────────
+def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
+    """Merge NYGC and SGDP intermediate pVCFs into the final Field 23370 output."""
+    ensure_dirs(cfg.wgs_dir())
+
+    for chrom in chroms:
+        out = cfg.wgs_pvcf(chrom)
+        if out.exists():
+            log(f"  skip (exists): {out.name}")
+            continue
+
+        nygc = cfg.nygc_pvcf(chrom)
+        sgdp = cfg.sgdp_pvcf(chrom)
+        sources = [p for p in (nygc, sgdp) if p.exists()]
+
+        if not sources:
+            log(f"  SKIP chr{chrom}: no intermediate pVCFs available")
+            continue
+
+        log(f"  [merge pVCF] chr{chrom} ({'+'.join(p.stem for p in sources)})")
+
+        if len(sources) == 1:
+            # Only one cohort available — symlink rather than copy
+            out.symlink_to(sources[0].resolve())
+            tbi_src = Path(str(sources[0]) + ".tbi")
+            tbi_dst = Path(str(out) + ".tbi")
+            if tbi_src.exists() and not tbi_dst.exists():
+                tbi_dst.symlink_to(tbi_src.resolve())
+        else:
+            run([cfg.tools.bcftools, "merge", "--output-type", "z",
+                 "--output", str(out)] + [str(s) for s in sources])
+            run([cfg.tools.bcftools, "index", "--tbi", str(out)])
+
+        log(f"    → {out.name}")
+
+
+# ── CRAM internals ────────────────────────────────────────────────────────────
 
 def _rename_kg_crams(cfg: Config, kg_map: pd.DataFrame) -> None:
     if kg_map.empty:
@@ -205,13 +297,10 @@ def _rename_kg_crams(cfg: Config, kg_map: pd.DataFrame) -> None:
 
 
 def _symlink_cram(cfg: Config, eid: int, src_cram: Path, src_crai: Path) -> None:
-    prefix = eid_prefix_dir(eid)
-    dest_dir = cfg.wgs_dir() / prefix
+    dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)
     ensure_dirs(dest_dir)
-
     dest_cram = dest_dir / f"{eid}_23149_0_0.cram"
     dest_crai = dest_dir / f"{eid}_23149_0_0.cram.crai"
-
     if not dest_cram.exists() and src_cram.exists():
         dest_cram.symlink_to(src_cram.resolve())
     if not dest_crai.exists() and src_crai.exists():

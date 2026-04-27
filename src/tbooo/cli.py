@@ -125,26 +125,23 @@ def map_imputed(config, chroms):
 
 @map.command("wgs")
 @CONFIG_OPTION
-@click.option("--chroms", default=None, help="Comma-separated chromosomes for pVCF")
-@click.option("--croms/--no-croms", "do_croms", default=True, help="Rename individual CRAMs")
-@click.option("--pvcf/--no-pvcf", default=True, help="Build 1KGP cohort pVCF per chromosome")
-@click.option("--sgdp-gvcf/--no-sgdp-gvcf", "do_sgdp_gvcf", default=False,
-              help="Symlink SGDP per-sample VCFs as gVCFs (Field 23151)")
-@click.option("--sgdp-pvcf/--no-sgdp-pvcf", "do_sgdp_pvcf", default=False,
-              help="Merge SGDP per-sample VCFs into per-chromosome pVCF")
-def map_wgs(config, chroms, do_croms, pvcf, do_sgdp_gvcf, do_sgdp_pvcf):
-    """Rename CRAMs and build cohort pVCFs (Fields 23149/23151/23370)."""
-    from tbooo.pipeline.wgs import rename_crams, build_pvcf, symlink_sgdp_gvcfs, build_sgdp_pvcf
+@click.option("--chroms", default=None, help="Comma-separated chromosomes")
+@click.option("--croms/--no-croms", "do_croms", default=True, help="Rename individual CRAMs (Field 23149)")
+@click.option("--gvcf/--no-gvcf", "do_gvcf", default=False,
+              help="Build per-sample gVCFs from NYGC + SGDP (Field 23151)")
+@click.option("--pvcf/--no-pvcf", "do_pvcf", default=True,
+              help="Build cohort pVCF from NYGC + SGDP merged (Field 23370)")
+def map_wgs(config, chroms, do_croms, do_gvcf, do_pvcf):
+    """Build WGS outputs (Fields 23149/23151/23370) from NYGC and SGDP VCFs."""
+    from tbooo.pipeline.wgs import rename_crams, build_gvcfs, build_pvcf
     cfg = _cfg(config)
     chrom_list = chroms.split(",") if chroms else cfg.chromosomes
     if do_croms:
         rename_crams(cfg)
-    if pvcf:
+    if do_gvcf:
+        build_gvcfs(cfg, chrom_list)
+    if do_pvcf:
         build_pvcf(cfg, chrom_list)
-    if do_sgdp_gvcf:
-        symlink_sgdp_gvcfs(cfg)
-    if do_sgdp_pvcf:
-        build_sgdp_pvcf(cfg, chrom_list)
 
 
 @map.command("wes")
