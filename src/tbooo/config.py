@@ -55,6 +55,9 @@ class Config:
     # tools
     tools: Tools
 
+    # parallel downloads
+    download_workers: int = 4
+
     @classmethod
     def load(cls, path: Path | str = "config.yaml") -> "Config":
         with open(path) as f:

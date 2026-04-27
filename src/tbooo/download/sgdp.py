@@ -18,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, log, wget_download
+from tbooo.utils import ensure_dirs, log, parallel_download, run, wget_download
 
 # ENA portal search API — sample-level metadata for SGDP study PRJEB9586
 # The /search endpoint supports result=sample; /filereport is file-only and rejects it.
@@ -136,16 +136,13 @@ def download_vcfs(cfg: Config) -> None:
         return
 
     log(f"  Found {len(url_map)} VCF file(s) to download.")
-    for filename, url in sorted(url_map.items()):
+    tasks = [(url, vcf_dir / filename, cfg.tools.wget) for filename, url in url_map.items()]
+    parallel_download(tasks, cfg.download_workers)
+
+    for filename in url_map:
         dest = vcf_dir / filename
         if dest.exists():
-            log(f"  skip (exists): {filename}")
-            continue
-        log(f"  downloading {filename}…")
-        wget_download(url, dest, tool_wget=cfg.tools.wget)
-        # index
-        from tbooo.utils import run
-        run([cfg.tools.bcftools, "index", "--tbi", str(dest)])
+            run([cfg.tools.bcftools, "index", "--tbi", str(dest)])
 
     log("SGDP VCF download complete.")
 

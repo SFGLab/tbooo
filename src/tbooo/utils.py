@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Sequence
 
@@ -49,6 +50,28 @@ def wget_download(url: str, dest: Path, *, tool_wget: str = "wget", resume: bool
     cmd = [tool_wget, "--continue" if resume else "--no-continue",
            "--quiet", "--show-progress", "-O", str(dest), url]
     run(cmd)
+
+
+def parallel_download(
+    tasks: list[tuple[str, Path, str]],
+    workers: int,
+) -> None:
+    """Download a list of (url, dest, wget_bin) tuples in parallel.
+
+    Skips files that already exist. Re-raises the first exception encountered.
+    """
+    def _one(url: str, dest: Path, wget_bin: str) -> None:
+        if dest.exists():
+            log(f"  skip (exists): {dest.name}")
+            return
+        log(f"  downloading: {dest.name}")
+        wget_download(url, dest, tool_wget=wget_bin)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_one, url, dest, wget): dest.name
+                   for url, dest, wget in tasks}
+        for future in as_completed(futures):
+            future.result()
 
 
 def eid_prefix_dir(eid: int) -> str:

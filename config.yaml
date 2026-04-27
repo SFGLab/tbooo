@@ -40,6 +40,10 @@ array_proxy_maf: 0.05
 # https://github.com/AstraZeneca-NGS/reference_data/blob/master/hg38/bed/Exome-IDT_V1.bed
 exome_bed: "data/reference/idt_xgen_exome_v1_GRCh38.bed"
 
+# ─── Parallel downloads ────────────────────────────────────────────────────────
+# Simultaneous wget processes for VCF chromosome downloads (1KGP and SGDP).
+download_workers: 4
+
 # ─── External tools ───────────────────────────────────────────────────────────
 # Override any entry if the binary is not on PATH.
 tools:

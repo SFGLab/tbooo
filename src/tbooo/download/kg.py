@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, log, run, wget_download
+from tbooo.utils import ensure_dirs, log, parallel_download, run, wget_download
 
 # ── Phase 3 ──────────────────────────────────────────────────────────────────
 
@@ -35,13 +35,15 @@ def download_phase3(cfg: Config, chroms: list[str]) -> None:
         wget,
     )
 
-    # Per-chromosome VCFs + tabix indices
+    # Per-chromosome VCFs + tabix indices (parallel)
     # Filename is derived from cfg.phase3_vcf() — sex chroms use different version strings.
+    tasks: list[tuple[str, Path, str]] = []
     for chrom in chroms:
         vcf_path = cfg.phase3_vcf(chrom)
         vcf_url = f"{base}/{vcf_path.name}"
-        _download_if_missing(vcf_url, vcf_path, wget)
-        _download_if_missing(f"{vcf_url}.tbi", Path(str(vcf_path) + ".tbi"), wget)
+        tasks.append((vcf_url, vcf_path, wget))
+        tasks.append((f"{vcf_url}.tbi", Path(str(vcf_path) + ".tbi"), wget))
+    parallel_download(tasks, cfg.download_workers)
 
     log(f"Phase 3 download complete → {out}")
 
@@ -68,12 +70,14 @@ def download_nygc(cfg: Config, chroms: list[str]) -> None:
         wget,
     )
 
+    tasks = []
     for chrom in chroms:
         vcf_name = _NYGC_VCF.format(date=date, chrom=chrom)
         vcf_url = f"{base}/{vcf_name}"
         vcf_path = out / vcf_name
-        _download_if_missing(vcf_url, vcf_path, wget)
-        _download_if_missing(f"{vcf_url}.tbi", Path(str(vcf_path) + ".tbi"), wget)
+        tasks.append((vcf_url, vcf_path, wget))
+        tasks.append((f"{vcf_url}.tbi", Path(str(vcf_path) + ".tbi"), wget))
+    parallel_download(tasks, cfg.download_workers)
 
     log(f"NYGC 30x download complete → {out}")
 
