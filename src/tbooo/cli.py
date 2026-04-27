@@ -128,17 +128,21 @@ def map_imputed(config, chroms):
 @click.option("--chroms", default=None, help="Comma-separated chromosomes for pVCF")
 @click.option("--croms/--no-croms", "do_croms", default=True, help="Rename individual CRAMs")
 @click.option("--pvcf/--no-pvcf", default=True, help="Build 1KGP cohort pVCF per chromosome")
+@click.option("--sgdp-gvcf/--no-sgdp-gvcf", "do_sgdp_gvcf", default=False,
+              help="Symlink SGDP per-sample VCFs as gVCFs (Field 23151)")
 @click.option("--sgdp-pvcf/--no-sgdp-pvcf", "do_sgdp_pvcf", default=False,
               help="Merge SGDP per-sample VCFs into per-chromosome pVCF")
-def map_wgs(config, chroms, do_croms, pvcf, do_sgdp_pvcf):
-    """Rename CRAMs and build cohort pVCFs (Field 23149/23370)."""
-    from tbooo.pipeline.wgs import rename_crams, build_pvcf, build_sgdp_pvcf
+def map_wgs(config, chroms, do_croms, pvcf, do_sgdp_gvcf, do_sgdp_pvcf):
+    """Rename CRAMs and build cohort pVCFs (Fields 23149/23151/23370)."""
+    from tbooo.pipeline.wgs import rename_crams, build_pvcf, symlink_sgdp_gvcfs, build_sgdp_pvcf
     cfg = _cfg(config)
     chrom_list = chroms.split(",") if chroms else cfg.chromosomes
     if do_croms:
         rename_crams(cfg)
     if pvcf:
         build_pvcf(cfg, chrom_list)
+    if do_sgdp_gvcf:
+        symlink_sgdp_gvcfs(cfg)
     if do_sgdp_pvcf:
         build_sgdp_pvcf(cfg, chrom_list)
 

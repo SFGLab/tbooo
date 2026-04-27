@@ -236,6 +236,18 @@ rule download_sgdp:
         touch {output.vcf_flag}
         """
 
+rule sgdp_gvcfs:
+    input:
+        vcf_flag = f"{SGDP_RAW}/vcf/.downloaded",
+        eid_map  = f"{META}/eid_map_sgdp.tsv",
+    output:
+        flag = f"{META}/.sgdp_gvcfs_linked",
+    shell:
+        """
+        tbooo --config config.yaml map wgs --no-croms --no-pvcf --sgdp-gvcf
+        touch {output.flag}
+        """
+
 rule sgdp_pvcf_chrom:
     input:
         vcf_flag  = f"{SGDP_RAW}/vcf/.downloaded",

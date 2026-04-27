@@ -1,8 +1,12 @@
-"""Build UKB-mirrored WGS data (Fields 23149, 23370) and SGDP per-chromosome pVCFs.
+"""Build UKB-mirrored WGS data (Fields 23149, 23151, 23370) and SGDP per-chromosome pVCFs.
 
 Individual CRAMs (Field 23149):
   - Rename/symlink 1KGP NYGC 30x CRAMs to <EID>_23149_0_0.cram
   - Place in EID-prefix subfolders under data/Bulk/Whole genome sequences/
+
+Individual gVCFs (Field 23151):
+  - Symlink SGDP per-sample VCFs to <EID>_23151_0_0.g.vcf.gz
+  - Same EID-prefix subdirectory layout as CRAMs
 
 1KGP cohort pVCF (Field 23370):
   - Reheader NYGC 30x per-chromosome VCFs, replacing sample IDs with EIDs
@@ -64,6 +68,51 @@ def build_pvcf(cfg: Config, chroms: list[str]) -> None:
         log(f"  done → {out.name}")
 
     log("pVCF build complete.")
+
+
+def symlink_sgdp_gvcfs(cfg: Config) -> None:
+    """Symlink SGDP per-sample VCFs into the UKB-mirrored gVCF structure (Field 23151).
+
+    Each downloaded <accession>.vcf.gz becomes:
+        data/Bulk/Whole genome sequences/<EID_prefix>/<EID>_23151_0_0.g.vcf.gz
+    """
+    vcf_dir = cfg.sgdp_vcf_dir()
+    if not vcf_dir.exists() or not any(vcf_dir.glob("*.vcf.gz")):
+        log("  No SGDP VCF files found; skipping. Run `tbooo download sgdp` first.")
+        return
+
+    eid_map = _load_eid_map(cfg, "eid_map_sgdp.tsv")
+    if eid_map.empty:
+        log("  WARNING: SGDP EID map not found; skipping. Run `tbooo map eids` first.")
+        return
+
+    log(f"[sgdp gVCF] symlinking {len(eid_map)} per-sample VCFs…")
+    linked = 0
+    for _, row in eid_map.iterrows():
+        eid = int(row["eid"])
+        ena_acc = row["ena_accession"]
+
+        matches = list(vcf_dir.glob(f"*{ena_acc}*.vcf.gz"))
+        if not matches:
+            continue
+        src_vcf = matches[0].resolve()
+        src_tbi = Path(str(src_vcf) + ".tbi")
+
+        prefix = eid_prefix_dir(eid)
+        dest_dir = cfg.wgs_dir() / prefix
+        ensure_dirs(dest_dir)
+
+        dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
+        dest_tbi = dest_dir / f"{eid}_23151_0_0.g.vcf.gz.tbi"
+
+        if not dest_vcf.exists() and src_vcf.exists():
+            dest_vcf.symlink_to(src_vcf)
+            linked += 1
+        if not dest_tbi.exists() and src_tbi.exists():
+            dest_tbi.symlink_to(src_tbi)
+
+    log(f"  linked {linked} gVCF(s) → {cfg.wgs_dir()}/")
+    log("SGDP gVCF symlinking complete.")
 
 
 def build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:

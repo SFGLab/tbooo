@@ -1,6 +1,6 @@
-# TBOOO — The Biobank Of Our Own
+# TBOOO - The Biobank Of Our Own
 
-A toolkit that reproduces the UK Biobank (UKB) data structure on DNAnexus RAP using freely available public datasets — **1000 Genomes Project** and the **Simons Genome Diversity Project** — so analysis pipelines can be developed, tested, and validated without requiring UKB access.
+A toolkit that reproduces the UK Biobank (UKB) data structure on DNAnexus RAP using freely available public datasets - **1000 Genomes Project** and the **Simons Genome Diversity Project** - so analysis pipelines can be developed, tested, and validated without requiring UKB access.
 
 ---
 
@@ -12,17 +12,18 @@ Running the full pipeline yields a directory tree that mirrors what a UKB resear
 data/
 ├── Bulk/
 │   ├── Genotype Results/Genotype calls/
-│   │   └── ukb22418_c{1-22}_b0_v2.{bed,bim,fam}           # Field 22418 — array PLINK
+│   │   └── ukb22418_c{1-22}_b0_v2.{bed,bim,fam}           # Field 22418 - array PLINK
 │   ├── Imputed/
-│   │   └── ukb22828_c{1-22}_b0_v3.{bgen,bgen.bgi,sample}  # Field 22828 — imputed BGEN
+│   │   └── ukb22828_c{1-22}_b0_v3.{bgen,bgen.bgi,sample}  # Field 22828 - imputed BGEN
 │   ├── Exome sequences/
 │   │   ├── Population level exome OQFE variants, PLINK format - 500k release/
-│   │   │   └── ukb23157_c{1-22}_b0_v1.{bed,bim,fam}        # Field 23157 — WES PLINK
+│   │   │   └── ukb23157_c{1-22}_b0_v1.{bed,bim,fam}        # Field 23157 - WES PLINK
 │   │   └── Population level exome OQFE variants, BGEN format - final release/
-│   │       └── ukb23157_c{1-22}_b0_v1.{bgen,bgen.bgi}      # Field 23157 — WES BGEN
+│   │       └── ukb23157_c{1-22}_b0_v1.{bgen,bgen.bgi}      # Field 23157 - WES BGEN
 │   └── Whole genome sequences/
-│       ├── 10/1000001_23149_0_0.{cram,cram.crai}            # Field 23149 — individual CRAMs (1KGP)
-│       └── ukb23370_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi} # Field 23370 — 1KGP cohort pVCF
+│       ├── 10/1000001_23149_0_0.{cram,cram.crai}            # Field 23149 - individual CRAMs (1KGP)
+│       ├── 20/2000001_23151_0_0.{g.vcf.gz,g.vcf.gz.tbi}    # Field 23151 - individual gVCFs (SGDP)
+│       └── ukb23370_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi} # Field 23370 - 1KGP cohort pVCF
 ├── Showcase/
 │   └── participant.parquet                                   # synthetic phenotype table
 ├── raw/
@@ -104,7 +105,7 @@ sgdp_populations: []
 
 ## Usage
 
-### Step 1 — Download reference files
+### Step 1 - Download reference files
 
 ```bash
 tbooo download reference
@@ -112,7 +113,7 @@ tbooo download reference
 
 Downloads: IDT xGen exome capture BED (GRCh38), 1KGP pedigree-based genetic maps, GRCh37 and GRCh38 reference FASTAs.
 
-### Step 2 — Download source data
+### Step 2 - Download source data
 
 ```bash
 # 1000 Genomes Phase 3 VCFs (GRCh37) + NYGC 30x VCFs (GRCh38)
@@ -128,19 +129,20 @@ tbooo download sgdp --no-vcf
 tbooo download 1kg --chroms 1,2,22
 ```
 
-### Step 3 — Build the mirrored structure
+### Step 3 - Build the mirrored structure
 
 Each step can be run individually or all at once via Snakemake.
 
 ```bash
-# Must run first — assigns synthetic EIDs to all samples
+# Must run first - assigns synthetic EIDs to all samples
 tbooo map eids
 
 # Build each data layer
 tbooo map array       # Phase 3 VCF → PLINK (Field 22418, GRCh37)
 tbooo map imputed     # Phase 3 VCF → BGEN  (Field 22828, GRCh37)
-tbooo map wgs                   # NYGC CRAMs → renamed; NYGC VCF → 1KGP pVCF (Fields 23149/23370, GRCh38)
-tbooo map wgs --sgdp-pvcf       # additionally merge SGDP per-sample VCFs into per-chromosome pVCF
+tbooo map wgs                             # NYGC CRAMs → renamed; NYGC VCF → 1KGP pVCF (Fields 23149/23370, GRCh38)
+tbooo map wgs --sgdp-gvcf                 # symlink SGDP per-sample VCFs as Field 23151 gVCFs
+tbooo map wgs --sgdp-gvcf --sgdp-pvcf    # also merge SGDP VCFs into per-chromosome population pVCF
 tbooo map wes         # NYGC VCF ∩ exome BED → PLINK + BGEN (Field 23157, GRCh38)
 tbooo map phenotypes  # EID maps → Parquet with UKB column naming (p<FIELD>_i<INST>_a<ARR>)
 tbooo map qc          # PLINK --het + KING → ukb_sqc_v2.txt + ukb_rel.txt
@@ -156,7 +158,7 @@ tbooo map wes --chroms 22
 # Full pipeline, 16 parallel jobs
 tbooo run --jobs 16
 
-# Dry run — print the execution plan without running anything
+# Dry run - print the execution plan without running anything
 tbooo run --jobs 16 --dry-run
 
 # Partial targets
@@ -174,7 +176,7 @@ The synthetic phenotype table (`data/Showcase/participant.parquet`) follows UKB 
 
 | Column | UKB Field | Source |
 |--------|-----------|--------|
-| `eid` | — | Synthetic 7-digit ID |
+| `eid` | - | Synthetic 7-digit ID |
 | `p31` | 31 | Sex (from sample panel) |
 | `p21000_i0` | 21000 | Ethnic background (mapped from superpopulation / SGDP region) |
 | `p22006` | 22006 | White British ancestry flag |
@@ -183,6 +185,7 @@ The synthetic phenotype table (`data/Showcase/participant.parquet`) follows UKB 
 | `p22418` | 22418 | Array data available |
 | `p22828` | 22828 | Imputed data available |
 | `p23149` | 23149 | WGS CRAM available (1KGP samples only) |
+| `p23151` | 23151 | Individual gVCF available (SGDP samples only) |
 | `p54_i0` | 54 | Assessment centre (synthetic) |
 
 Clinical fields (diagnoses, medications, hospital records, imaging) are present as null columns so downstream scripts that reference them do not break.
@@ -193,9 +196,9 @@ Clinical fields (diagnoses, medications, hospital records, imaging) are present 
 
 | File | Contents |
 |------|----------|
-| [docs/1_ukb_structure.md](docs/1_ukb_structure.md) | UK Biobank data structure on DNAnexus RAP — file naming, field IDs, formats, reference genomes |
-| [docs/2_data_sources.md](docs/2_data_sources.md) | 1KGP and SGDP data — phases, sample counts, VCF paths, access methods |
-| [docs/3_data_mapping.md](docs/3_data_mapping.md) | Mapping specification — how each source file becomes each UKB-mirrored output |
+| [docs/1_ukb_structure.md](docs/1_ukb_structure.md) | UK Biobank data structure on DNAnexus RAP - file naming, field IDs, formats, reference genomes |
+| [docs/2_data_sources.md](docs/2_data_sources.md) | 1KGP and SGDP data - phases, sample counts, VCF paths, access methods |
+| [docs/3_data_mapping.md](docs/3_data_mapping.md) | Mapping specification - how each source file becomes each UKB-mirrored output |
 
 ---
 
@@ -205,6 +208,6 @@ Clinical fields (diagnoses, medications, hospital records, imaging) are present 
 - **Array coverage**: Only variants present in both the 1KGP Phase 3 VCFs and the array manifest are included. Affymetrix-specific probes with no 1KGP equivalent are absent.
 - **Imputation dosages**: BGEN files are built from hard genotype calls; dosage probabilities are 0 or 1. Real UKB imputed data has fractional uncertainty.
 - **Population composition**: 1KGP/SGDP are globally diverse; UKB is ~94% European. Allele frequency distributions differ.
-- **SGDP CRAMs not downloaded**: Only per-sample phased VCFs are fetched from ENA (much smaller than ~14 TB of CRAMs). SGDP genotype data feeds into `data/raw/sgdp/pvcf/` — it is not merged into the UKB-mirrored Bulk/ tree, which remains 1KGP-only.
+- **SGDP CRAMs not downloaded**: Only per-sample phased VCFs are fetched from ENA (much smaller than ~14 TB of CRAMs). SGDP genotype data feeds into `data/raw/sgdp/pvcf/` - it is not merged into the UKB-mirrored Bulk/ tree, which remains 1KGP-only.
 - **No clinical phenotypes**: Only metadata-derivable fields are populated (sex, ancestry, batch). Disease diagnoses, hospital records, imaging, and longitudinal data are not available.
 - **WES is simulated**: Intersection of WGS variants with an exome capture BED is used, not true capture sequencing. Capture efficiency gradients and strand bias differ from real exome data.
