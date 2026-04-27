@@ -36,10 +36,10 @@ def download_phase3(cfg: Config, chroms: list[str]) -> None:
     )
 
     # Per-chromosome VCFs + tabix indices
+    # Filename is derived from cfg.phase3_vcf() — sex chroms use different version strings.
     for chrom in chroms:
-        vcf_name = _PHASE3_VCF.format(chrom=chrom, ver=ver, date=date)
-        vcf_url = f"{base}/{vcf_name}"
-        vcf_path = out / vcf_name
+        vcf_path = cfg.phase3_vcf(chrom)
+        vcf_url = f"{base}/{vcf_path.name}"
         _download_if_missing(vcf_url, vcf_path, wget)
         _download_if_missing(f"{vcf_url}.tbi", Path(str(vcf_path) + ".tbi"), wget)
 
@@ -49,7 +49,8 @@ def download_phase3(cfg: Config, chroms: list[str]) -> None:
 # ── NYGC 30x ─────────────────────────────────────────────────────────────────
 
 _NYGC_VCF = "CCDG_14151_B01_GRM_WGS_{date}_chr{chrom}.filtered.shapeit2-duohmm-phased.vcf.gz"
-_NYGC_PANEL = "20201028_3202_samples_5_subpopulations.tsv"
+_NYGC_PANEL = "20130606_g1k_3202_samples_ped_population.txt"
+_NYGC_PANEL_BASE = "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage"
 
 
 def download_nygc(cfg: Config, chroms: list[str]) -> None:
@@ -62,7 +63,7 @@ def download_nygc(cfg: Config, chroms: list[str]) -> None:
 
     # Extended sample panel (3,202 samples including related)
     _download_if_missing(
-        f"https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/{_NYGC_PANEL}",
+        f"{_NYGC_PANEL_BASE}/{_NYGC_PANEL}",
         out / _NYGC_PANEL,
         wget,
     )

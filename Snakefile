@@ -96,6 +96,9 @@ rule all_sgdp_pvcf:
 # ── Download rules ────────────────────────────────────────────────────────────
 
 rule download_phase3_vcf:
+    # Autosome-only rule — sex chroms have different filename patterns (see rules below).
+    wildcard_constraints:
+        chrom = "|".join(str(c) for c in _cfg["autosomes"]),
     output:
         vcf   = f"{KG_RAW}/ALL.chr{{chrom}}.phase3_shapeit2_mvncall_integrated_{KG_VER}.{KG_DATE}.genotypes.vcf.gz",
         index = f"{KG_RAW}/ALL.chr{{chrom}}.phase3_shapeit2_mvncall_integrated_{KG_VER}.{KG_DATE}.genotypes.vcf.gz.tbi",
@@ -110,6 +113,40 @@ rule download_phase3_vcf:
         wget --continue -q --show-progress \
              -O {output.index} \
              {params.base}/ALL.chr{wildcards.chrom}.phase3_shapeit2_mvncall_integrated_{KG_VER}.{KG_DATE}.genotypes.vcf.gz.tbi
+        """
+
+rule download_phase3_chrX_vcf:
+    output:
+        vcf   = f"{KG_RAW}/ALL.chrX.phase3_shapeit2_mvncall_integrated_v1c.{KG_DATE}.genotypes.vcf.gz",
+        index = f"{KG_RAW}/ALL.chrX.phase3_shapeit2_mvncall_integrated_v1c.{KG_DATE}.genotypes.vcf.gz.tbi",
+    params:
+        base = _cfg["kg_phase3_base_url"],
+    shell:
+        """
+        mkdir -p {KG_RAW}
+        wget --continue -q --show-progress \
+             -O {output.vcf} \
+             {params.base}/ALL.chrX.phase3_shapeit2_mvncall_integrated_v1c.{KG_DATE}.genotypes.vcf.gz
+        wget --continue -q --show-progress \
+             -O {output.index} \
+             {params.base}/ALL.chrX.phase3_shapeit2_mvncall_integrated_v1c.{KG_DATE}.genotypes.vcf.gz.tbi
+        """
+
+rule download_phase3_chrY_vcf:
+    output:
+        vcf   = f"{KG_RAW}/ALL.chrY.phase3_integrated_v2b.{KG_DATE}.genotypes.vcf.gz",
+        index = f"{KG_RAW}/ALL.chrY.phase3_integrated_v2b.{KG_DATE}.genotypes.vcf.gz.tbi",
+    params:
+        base = _cfg["kg_phase3_base_url"],
+    shell:
+        """
+        mkdir -p {KG_RAW}
+        wget --continue -q --show-progress \
+             -O {output.vcf} \
+             {params.base}/ALL.chrY.phase3_integrated_v2b.{KG_DATE}.genotypes.vcf.gz
+        wget --continue -q --show-progress \
+             -O {output.index} \
+             {params.base}/ALL.chrY.phase3_integrated_v2b.{KG_DATE}.genotypes.vcf.gz.tbi
         """
 
 rule download_phase3_panel:
@@ -146,12 +183,12 @@ rule download_nygc_vcf:
 
 rule download_nygc_panel:
     output:
-        f"{KG_RAW}/20201028_3202_samples_5_subpopulations.tsv",
+        f"{KG_RAW}/20130606_g1k_3202_samples_ped_population.txt",
     shell:
         """
         mkdir -p {KG_RAW}
         wget --continue -q -O {output} \
-            https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20201028_3202_samples_5_subpopulations.tsv
+            https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20130606_g1k_3202_samples_ped_population.txt
         """
 
 rule download_reference:
@@ -166,7 +203,7 @@ rule download_reference:
 
 rule assign_eids:
     input:
-        panel    = f"{KG_RAW}/20201028_3202_samples_5_subpopulations.tsv",
+        panel    = f"{KG_RAW}/20130606_g1k_3202_samples_ped_population.txt",
         sgdp_meta = f"{SGDP_RAW}/sgdp_samples.tsv",
     output:
         kg_map      = f"{META}/eid_map_1kg.tsv",

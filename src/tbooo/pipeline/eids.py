@@ -34,7 +34,7 @@ def _assign_1kg(cfg: Config) -> None:
     out_rename = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
 
     # Try NYGC panel first (3,202 samples); fall back to Phase 3 panel (2,504)
-    nygc_panel = cfg.kg_raw_dir() / "20201028_3202_samples_5_subpopulations.tsv"
+    nygc_panel = cfg.kg_raw_dir() / "20130606_g1k_3202_samples_ped_population.txt"
     phase3_panel = cfg.kg_raw_dir() / f"integrated_call_samples_v3.{cfg.kg_phase3_release_date}.ALL.panel"
 
     if nygc_panel.exists():
@@ -74,28 +74,61 @@ def _read_phase3_panel(path: Path) -> pd.DataFrame:
 
 def _read_nygc_panel(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t")
-    # NYGC panel columns vary — handle common layouts
-    col_map = {}
-    for c in df.columns:
-        lc = c.lower()
-        if "sample" in lc:
-            col_map[c] = "sample_id"
-        elif lc in ("population", "pop"):
-            col_map[c] = "pop"
-        elif "super" in lc:
-            col_map[c] = "super_pop"
-        elif lc in ("sex", "gender"):
-            col_map[c] = "sex_label"
-    df = df.rename(columns=col_map)
-    if "sex_label" in df.columns:
-        df["sex"] = df["sex_label"].map(
-            {"male": 1, "female": 2, "Male": 1, "Female": 2, "1": 1, "2": 2}
-        ).fillna(0).astype(int)
+
+    # 20130606_g1k_3202_samples_ped_population.txt is PED+pop format:
+    # FamilyID  SampleID  FatherID  MotherID  Sex  Phenotype  Population  Superpopulation
+    # Detect by checking for PED-style columns.
+    cols_lower = [c.lower() for c in df.columns]
+    is_ped = "fatherid" in cols_lower or "father_id" in cols_lower or (
+        len(df.columns) >= 6 and cols_lower[2] in ("fatherid", "father_id", "father")
+    )
+
+    if is_ped:
+        # Normalise column names regardless of capitalisation
+        rename = {}
+        for c in df.columns:
+            lc = c.lower()
+            if lc in ("sampleid", "sample_id", "individualid", "individual_id") or (
+                "sample" in lc and "id" in lc
+            ):
+                rename[c] = "sample_id"
+            elif lc in ("sex", "gender"):
+                rename[c] = "sex_raw"
+            elif lc in ("population", "pop"):
+                rename[c] = "pop"
+            elif "super" in lc:
+                rename[c] = "super_pop"
+        df = df.rename(columns=rename)
+        # PED sex encoding: 1=male, 2=female, 0=unknown
+        if "sex_raw" in df.columns:
+            df["sex"] = pd.to_numeric(df["sex_raw"], errors="coerce").fillna(0).astype(int)
+        else:
+            df["sex"] = 0
     else:
-        df["sex"] = 0
+        # Generic fallback for TSV panels with labelled columns
+        col_map = {}
+        for c in df.columns:
+            lc = c.lower()
+            if "sample" in lc:
+                col_map[c] = "sample_id"
+            elif lc in ("population", "pop"):
+                col_map[c] = "pop"
+            elif "super" in lc:
+                col_map[c] = "super_pop"
+            elif lc in ("sex", "gender"):
+                col_map[c] = "sex_label"
+        df = df.rename(columns=col_map)
+        if "sex_label" in df.columns:
+            df["sex"] = df["sex_label"].map(
+                {"male": 1, "female": 2, "Male": 1, "Female": 2, "1": 1, "2": 2}
+            ).fillna(0).astype(int)
+        else:
+            df["sex"] = 0
+
     for col in ("pop", "super_pop"):
         if col not in df.columns:
             df[col] = "UNK"
+
     return df[["sample_id", "pop", "super_pop", "sex"]]
 
 

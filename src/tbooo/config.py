@@ -116,8 +116,10 @@ class Config:
     def phase3_vcf(self, chrom: str) -> Path:
         date = self.kg_phase3_release_date
         ver = self.kg_phase3_vcf_version
-        if chrom in ("X", "Y"):
-            return self.kg_raw_dir() / f"ALL.chr{chrom}.phase3_shapeit2_mvncall_integrated_{ver}.{date}.genotypes.vcf.gz"
+        if chrom == "X":
+            return self.kg_raw_dir() / f"ALL.chrX.phase3_shapeit2_mvncall_integrated_v1c.{date}.genotypes.vcf.gz"
+        if chrom == "Y":
+            return self.kg_raw_dir() / f"ALL.chrY.phase3_integrated_v2b.{date}.genotypes.vcf.gz"
         return self.kg_raw_dir() / f"ALL.chr{chrom}.phase3_shapeit2_mvncall_integrated_{ver}.{date}.genotypes.vcf.gz"
 
     def nygc_vcf(self, chrom: str) -> Path:
