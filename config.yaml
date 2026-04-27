@@ -37,8 +37,9 @@ array_manifest: ""
 array_proxy_maf: 0.05
 
 # ─── WES simulation ───────────────────────────────────────────────────────────
-# IDT xGen Exome Research Panel v1.0, GRCh38.
-# Downloaded automatically by `tbooo download reference`.
+# IDT xGen Exome Research Panel v1.0, hg38 (chr-prefixed).
+# Downloaded automatically by `tbooo download reference` from:
+# https://github.com/AstraZeneca-NGS/reference_data/blob/master/hg38/bed/Exome-IDT_V1.bed
 exome_bed: "data/reference/idt_xgen_exome_v1_GRCh38.bed"
 
 # ─── External tools ───────────────────────────────────────────────────────────

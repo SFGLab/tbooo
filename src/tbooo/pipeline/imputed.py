@@ -20,7 +20,7 @@ import pandas as pd
 from tbooo.config import Config
 from tbooo.utils import ensure_dirs, log, run
 
-_GRCH37_FASTA = "GRCh37/human_g1k_v37.fasta.gz"
+_GRCH37_FASTA = "GRCh37/human_g1k_v37.fasta"
 
 
 def run_imputed_pipeline(cfg: Config, chroms: list[str]) -> None:
