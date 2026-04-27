@@ -1,0 +1,53 @@
+# ─── Directories ──────────────────────────────────────────────────────────────
+data_dir: data
+reference_dir: data/reference
+tmp_dir: data/tmp
+
+# ─── Chromosomes to process ───────────────────────────────────────────────────
+autosomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]
+# Set to [] to skip sex chromosomes
+sex_chromosomes: ["X"]
+
+# ─── 1000 Genomes Phase 3 ─────────────────────────────────────────────────────
+kg_phase3_release_date: "20130502"
+kg_phase3_vcf_version: "v5b"
+kg_phase3_base_url: "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502"
+
+# 1000 Genomes NYGC 30x high-coverage
+kg_nygc_date: "2020-08-05"
+kg_nygc_base_url: "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased"
+
+# ─── SGDP ─────────────────────────────────────────────────────────────────────
+sgdp_ena_pointers_url: "https://ftp.sra.ebi.ac.uk/vol1/ERZ000/ERZ000030/ena.ftp.pointers.txt"
+# Maximum simultaneous CRAM downloads (SGDP ENA has rate limits)
+sgdp_download_workers: 4
+# Download only these populations (empty list = all 279 public samples)
+sgdp_populations: []
+
+# ─── EID ranges ───────────────────────────────────────────────────────────────
+kg_eid_start: 1000000
+sgdp_eid_start: 2000000
+
+# ─── Array simulation ─────────────────────────────────────────────────────────
+# Path to UKB Axiom array manifest (GRCh37 positions).
+# Obtain from Thermo Fisher: Axiom_UKB_WCSG.na35.annot.csv
+# If not provided, common SNPs (MAF >= 0.05, rsID present) are used as proxy.
+array_manifest: ""
+# Fallback MAF threshold when no manifest is provided
+array_proxy_maf: 0.05
+
+# ─── WES simulation ───────────────────────────────────────────────────────────
+# IDT xGen Exome Research Panel v1.0, GRCh38.
+# Downloaded automatically by `tbooo download reference`.
+exome_bed: "data/reference/idt_xgen_exome_v1_GRCh38.bed"
+
+# ─── External tools ───────────────────────────────────────────────────────────
+# Override any entry if the binary is not on PATH.
+tools:
+  bcftools: bcftools
+  plink2: plink2
+  qctool: qctool
+  bgenix: bgenix
+  samtools: samtools
+  king: king
+  wget: wget

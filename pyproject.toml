@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tbooo"
+version = "0.1.0"
+description = "The Biobank Of Our Own - simulate UK Biobank structure from public genomic datasets"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.0",
+    "pyyaml>=6.0",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "tqdm>=4.65",
+]
+
+[project.scripts]
+tbooo = "tbooo.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tbooo"]
