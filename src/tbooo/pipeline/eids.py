@@ -19,17 +19,6 @@ from tbooo.utils import ensure_dirs, log
 # 1KGP superpop → batch code (used in FAM column 6)
 _BATCH_MAP = {"EUR": 1, "AFR": 2, "EAS": 3, "SAS": 4, "AMR": 5}
 
-# SGDP region → continent label (for phenotype mapping)
-_SGDP_REGION_LABELS = {
-    "WestEurasia": "West Eurasia",
-    "Africa": "Africa",
-    "EastAsia": "East Asia",
-    "SouthAsia": "South Asia",
-    "CentralAsiaSiberia": "Central Asia / Siberia",
-    "Oceania": "Oceania",
-    "America": "Native Americas",
-}
-
 
 def assign_eids(cfg: Config) -> None:
     ensure_dirs(cfg.metadata_dir())
@@ -116,34 +105,18 @@ def _assign_sgdp(cfg: Config) -> None:
     out_map = cfg.metadata_dir() / "eid_map_sgdp.tsv"
     out_rename = cfg.metadata_dir() / "vcf_sample_rename_sgdp.txt"
 
-    pointers = cfg.sgdp_raw_dir() / "ena.ftp.pointers.txt"
-    if not pointers.exists():
-        log("  WARNING: SGDP pointers file not found; skipping SGDP EID assignment.")
-        log(f"  Run `tbooo download sgdp` to fetch {pointers}")
+    samples_tsv = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
+    if not samples_tsv.exists():
+        log("  WARNING: SGDP metadata not found; skipping SGDP EID assignment.")
+        log(f"  Run `tbooo download sgdp` to fetch {samples_tsv}")
         return
 
-    rows: list[dict] = []
-    seen: set[str] = set()
-    with open(pointers) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split("\t")
-            if len(parts) < 3:
-                continue
-            sample, population, url = parts[0], parts[1], parts[2]
-            if not url.endswith(".cram"):
-                continue
-            if sample in seen:
-                continue
-            seen.add(sample)
-            region = _infer_region(population)
-            sex = _infer_sex_from_url(url)
-            rows.append({"ena_accession": sample, "population": population,
-                         "region": region, "sex": sex})
+    df = pd.read_csv(samples_tsv, sep="\t")
+    if df.empty:
+        log("  WARNING: SGDP metadata file is empty; skipping.")
+        return
 
-    df = pd.DataFrame(rows).reset_index(drop=True)
+    df = df.reset_index(drop=True)
     df.insert(0, "eid", range(cfg.sgdp_eid_start, cfg.sgdp_eid_start + len(df)))
     df["source"] = "sgdp"
     df.to_csv(out_map, sep="\t", index=False)
@@ -153,30 +126,3 @@ def _assign_sgdp(cfg: Config) -> None:
         for _, row in df.iterrows():
             f.write(f"{row['ena_accession']}\t{row['eid']}\n")
     log(f"  wrote {out_rename}")
-
-
-def _infer_region(population: str) -> str:
-    # Best-effort region label; can be improved with a full SGDP metadata table
-    mapping = {
-        "Greek": "WestEurasia", "French": "WestEurasia", "English": "WestEurasia",
-        "Yoruba": "Africa", "Mandinka": "Africa", "Zulu": "Africa",
-        "Han": "EastAsia", "Japanese": "EastAsia", "Vietnamese": "EastAsia",
-        "Bengali": "SouthAsia", "Punjabi": "SouthAsia", "Tamil": "SouthAsia",
-        "Papuan": "Oceania", "Australian": "Oceania",
-        "Maya": "America", "Quechua": "America",
-        "Buryat": "CentralAsiaSiberia", "Kazakh": "CentralAsiaSiberia",
-    }
-    for key, region in mapping.items():
-        if key.lower() in population.lower():
-            return _SGDP_REGION_LABELS.get(region, region)
-    return "Unknown"
-
-
-def _infer_sex_from_url(url: str) -> int:
-    # SGDP CRAMs sometimes encode sex in the filename; fall back to 0 (unknown)
-    name = url.lower()
-    if "_male_" in name and "_female_" not in name:
-        return 1
-    if "_female_" in name:
-        return 2
-    return 0

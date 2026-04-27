@@ -68,15 +68,14 @@ def download_1kg(config, phase3, nygc, chroms):
 
 @download.command("sgdp")
 @CONFIG_OPTION
-@click.option("--populations", default=None, help="Comma-separated population names to download")
-@click.option("--workers", default=None, type=int, help="Parallel download workers")
-def download_sgdp(config, populations, workers):
-    """Download SGDP CRAM files from ENA."""
-    from tbooo.download.sgdp import download_cramps
+@click.option("--vcf/--no-vcf", "do_vcf", default=True, help="Download per-sample VCF files")
+def download_sgdp(config, do_vcf):
+    """Download SGDP sample metadata and VCF files from ENA (no CRAMs)."""
+    from tbooo.download.sgdp import download_metadata, download_vcfs
     cfg = _cfg(config)
-    pop_list = populations.split(",") if populations else cfg.sgdp_populations
-    n_workers = workers or cfg.sgdp_download_workers
-    download_cramps(cfg, pop_list, n_workers)
+    download_metadata(cfg)
+    if do_vcf:
+        download_vcfs(cfg)
 
 
 @download.command("reference")
@@ -128,16 +127,20 @@ def map_imputed(config, chroms):
 @CONFIG_OPTION
 @click.option("--chroms", default=None, help="Comma-separated chromosomes for pVCF")
 @click.option("--croms/--no-croms", "do_croms", default=True, help="Rename individual CRAMs")
-@click.option("--pvcf/--no-pvcf", default=True, help="Build cohort pVCF per chromosome")
-def map_wgs(config, chroms, do_croms, pvcf):
-    """Rename CRAMs and build cohort pVCF (Field 23149/23370)."""
-    from tbooo.pipeline.wgs import rename_crams, build_pvcf
+@click.option("--pvcf/--no-pvcf", default=True, help="Build 1KGP cohort pVCF per chromosome")
+@click.option("--sgdp-pvcf/--no-sgdp-pvcf", "do_sgdp_pvcf", default=False,
+              help="Merge SGDP per-sample VCFs into per-chromosome pVCF")
+def map_wgs(config, chroms, do_croms, pvcf, do_sgdp_pvcf):
+    """Rename CRAMs and build cohort pVCFs (Field 23149/23370)."""
+    from tbooo.pipeline.wgs import rename_crams, build_pvcf, build_sgdp_pvcf
     cfg = _cfg(config)
+    chrom_list = chroms.split(",") if chroms else cfg.chromosomes
     if do_croms:
         rename_crams(cfg)
     if pvcf:
-        chrom_list = chroms.split(",") if chroms else cfg.chromosomes
         build_pvcf(cfg, chrom_list)
+    if do_sgdp_pvcf:
+        build_sgdp_pvcf(cfg, chrom_list)
 
 
 @map.command("wes")

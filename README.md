@@ -12,24 +12,31 @@ Running the full pipeline yields a directory tree that mirrors what a UKB resear
 data/
 ├── Bulk/
 │   ├── Genotype Results/Genotype calls/
-│   │   └── ukb22418_c{1-22}_b0_v2.{bed,bim,fam}      # Field 22418 — array PLINK
+│   │   └── ukb22418_c{1-22}_b0_v2.{bed,bim,fam}           # Field 22418 — array PLINK
 │   ├── Imputed/
 │   │   └── ukb22828_c{1-22}_b0_v3.{bgen,bgen.bgi,sample}  # Field 22828 — imputed BGEN
 │   ├── Exome sequences/
 │   │   ├── Population level exome OQFE variants, PLINK format - 500k release/
-│   │   │   └── ukb23157_c{1-22}_b0_v1.{bed,bim,fam}   # Field 23157 — WES PLINK
+│   │   │   └── ukb23157_c{1-22}_b0_v1.{bed,bim,fam}        # Field 23157 — WES PLINK
 │   │   └── Population level exome OQFE variants, BGEN format - final release/
-│   │       └── ukb23157_c{1-22}_b0_v1.{bgen,bgen.bgi} # Field 23157 — WES BGEN
+│   │       └── ukb23157_c{1-22}_b0_v1.{bgen,bgen.bgi}      # Field 23157 — WES BGEN
 │   └── Whole genome sequences/
-│       ├── 10/1000001_23149_0_0.{cram,cram.crai}       # Field 23149 — individual CRAMs
-│       └── ukb23370_c{1-22}_b0_v1.{pvcf.gz,pvcf.gz.tbi}  # Field 23370 — cohort pVCF
+│       ├── 10/1000001_23149_0_0.{cram,cram.crai}            # Field 23149 — individual CRAMs (1KGP)
+│       └── ukb23370_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi} # Field 23370 — 1KGP cohort pVCF
 ├── Showcase/
-│   └── participant.parquet                              # synthetic phenotype table
+│   └── participant.parquet                                   # synthetic phenotype table
+├── raw/
+│   └── sgdp/
+│       ├── sgdp_samples.tsv                                  # SGDP sample metadata
+│       ├── vcf/<accession>.vcf.gz                            # per-sample phased VCFs (from ENA)
+│       └── pvcf/sgdp_c{1-22,X}.{pvcf.gz,pvcf.gz.tbi}       # merged SGDP pVCF per chromosome
 └── metadata/
-    ├── eid_map_1kg.tsv                                  # 1KGP sample → synthetic EID
-    ├── eid_map_sgdp.tsv                                 # SGDP sample → synthetic EID
-    ├── ukb_sqc_v2.txt                                   # sample QC flags
-    └── ukb_rel.txt                                      # pairwise kinship (KING)
+    ├── eid_map_1kg.tsv                                       # 1KGP sample → synthetic EID
+    ├── eid_map_sgdp.tsv                                      # SGDP sample → synthetic EID
+    ├── vcf_sample_rename_1kg.txt                             # bcftools reheader map (1KGP)
+    ├── vcf_sample_rename_sgdp.txt                            # bcftools reheader map (SGDP)
+    ├── ukb_sqc_v2.txt                                        # sample QC flags
+    └── ukb_rel.txt                                           # pairwise kinship (KING)
 ```
 
 ---
@@ -40,9 +47,9 @@ data/
 |---------|--------------|---------|-----------|
 | **1KGP Phase 3** | Array + imputed genotypes | 2,504 unrelated | GRCh37 |
 | **1KGP NYGC 30x** | WGS CRAMs, cohort pVCF, WES simulation | 3,202 (incl. trios) | GRCh38 |
-| **SGDP** | WGS CRAMs (expanded diversity) | 279 public | GRCh38 |
+| **SGDP** | Per-sample VCFs + phenotype diversity | 300 (142 populations) | GRCh38 |
 
-All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
+SGDP CRAMs (~14 TB) are not downloaded. Per-sample phased VCF files are fetched from ENA analysis results and merged into per-chromosome pVCFs with EID renaming. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
 
 ---
 
@@ -88,9 +95,9 @@ sex_chromosomes: ["X"]
 array_manifest: ""
 array_proxy_maf: 0.05
 
-# optional: restrict SGDP downloads to specific populations
-sgdp_populations: []         # empty = all 279 public samples
-sgdp_download_workers: 4
+# optional: restrict SGDP metadata to specific populations
+# empty list = all 300 samples across 142 populations
+sgdp_populations: []
 ```
 
 ---
@@ -105,14 +112,17 @@ tbooo download reference
 
 Downloads: IDT xGen exome capture BED (GRCh38), 1KGP pedigree-based genetic maps, GRCh37 and GRCh38 reference FASTAs.
 
-### Step 2 — Download source genotype data
+### Step 2 — Download source data
 
 ```bash
 # 1000 Genomes Phase 3 VCFs (GRCh37) + NYGC 30x VCFs (GRCh38)
 tbooo download 1kg
 
-# SGDP CRAM files from ENA (large; ~14 TB total for all samples)
-tbooo download sgdp --workers 8
+# SGDP metadata + per-sample VCFs from ENA (no CRAMs)
+tbooo download sgdp
+
+# Skip VCF download (metadata only)
+tbooo download sgdp --no-vcf
 
 # Download only specific chromosomes
 tbooo download 1kg --chroms 1,2,22
@@ -129,7 +139,8 @@ tbooo map eids
 # Build each data layer
 tbooo map array       # Phase 3 VCF → PLINK (Field 22418, GRCh37)
 tbooo map imputed     # Phase 3 VCF → BGEN  (Field 22828, GRCh37)
-tbooo map wgs         # NYGC CRAMs → renamed; NYGC VCF → pVCF (Fields 23149/23370, GRCh38)
+tbooo map wgs                   # NYGC CRAMs → renamed; NYGC VCF → 1KGP pVCF (Fields 23149/23370, GRCh38)
+tbooo map wgs --sgdp-pvcf       # additionally merge SGDP per-sample VCFs into per-chromosome pVCF
 tbooo map wes         # NYGC VCF ∩ exome BED → PLINK + BGEN (Field 23157, GRCh38)
 tbooo map phenotypes  # EID maps → Parquet with UKB column naming (p<FIELD>_i<INST>_a<ARR>)
 tbooo map qc          # PLINK --het + KING → ukb_sqc_v2.txt + ukb_rel.txt
@@ -165,13 +176,13 @@ The synthetic phenotype table (`data/Showcase/participant.parquet`) follows UKB 
 |--------|-----------|--------|
 | `eid` | — | Synthetic 7-digit ID |
 | `p31` | 31 | Sex (from sample panel) |
-| `p21000_i0` | 21000 | Ethnic background (mapped from superpopulation) |
+| `p21000_i0` | 21000 | Ethnic background (mapped from superpopulation / SGDP region) |
 | `p22006` | 22006 | White British ancestry flag |
 | `p22020` | 22020 | Used in PCA calculation |
 | `p22000` | 22000 | Genotyping batch code |
 | `p22418` | 22418 | Array data available |
 | `p22828` | 22828 | Imputed data available |
-| `p23149` | 23149 | WGS CRAM available |
+| `p23149` | 23149 | WGS CRAM available (1KGP samples only) |
 | `p54_i0` | 54 | Assessment centre (synthetic) |
 
 Clinical fields (diagnoses, medications, hospital records, imaging) are present as null columns so downstream scripts that reference them do not break.
@@ -194,5 +205,6 @@ Clinical fields (diagnoses, medications, hospital records, imaging) are present 
 - **Array coverage**: Only variants present in both the 1KGP Phase 3 VCFs and the array manifest are included. Affymetrix-specific probes with no 1KGP equivalent are absent.
 - **Imputation dosages**: BGEN files are built from hard genotype calls; dosage probabilities are 0 or 1. Real UKB imputed data has fractional uncertainty.
 - **Population composition**: 1KGP/SGDP are globally diverse; UKB is ~94% European. Allele frequency distributions differ.
+- **SGDP CRAMs not downloaded**: Only per-sample phased VCFs are fetched from ENA (much smaller than ~14 TB of CRAMs). SGDP genotype data feeds into `data/raw/sgdp/pvcf/` — it is not merged into the UKB-mirrored Bulk/ tree, which remains 1KGP-only.
 - **No clinical phenotypes**: Only metadata-derivable fields are populated (sex, ancestry, batch). Disease diagnoses, hospital records, imaging, and longitudinal data are not available.
 - **WES is simulated**: Intersection of WGS variants with an exome capture BED is used, not true capture sequencing. Capture efficiency gradients and strand bias differ from real exome data.

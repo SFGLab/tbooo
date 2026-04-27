@@ -38,9 +38,7 @@ class Config:
     kg_nygc_date: str
     kg_nygc_base_url: str
 
-    # SGDP
-    sgdp_ena_pointers_url: str
-    sgdp_download_workers: int
+    # SGDP (VCF + metadata; no CRAM downloads)
     sgdp_populations: list[str]
 
     # EID ranges
@@ -108,6 +106,12 @@ class Config:
 
     def sgdp_raw_dir(self) -> Path:
         return self.data_dir / "raw" / "sgdp"
+
+    def sgdp_vcf_dir(self) -> Path:
+        return self.sgdp_raw_dir() / "vcf"
+
+    def sgdp_pvcf(self, chrom: str) -> Path:
+        return self.sgdp_raw_dir() / "pvcf" / f"sgdp_c{chrom}.pvcf.gz"
 
     def phase3_vcf(self, chrom: str) -> Path:
         date = self.kg_phase3_release_date

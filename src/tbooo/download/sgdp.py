@@ -1,92 +1,224 @@
-"""Download SGDP CRAM files from ENA using the FTP pointers file."""
+"""Download SGDP VCF files and sample metadata from ENA.
+
+SGDP raw CRAMs (~14 TB) are not downloaded. Instead we fetch:
+  - Sample metadata (ENA sample API, ~KB)
+  - Per-sample phased VCF files from ENA analysis results (~few hundred GB)
+
+Outputs:
+    data/raw/sgdp/sgdp_samples.tsv
+        columns: ena_accession, sample_alias, population, region, sex
+    data/raw/sgdp/vcf/<accession>.vcf.gz  (one per sample)
+"""
 
 from __future__ import annotations
 
-import concurrent.futures
 import urllib.request
 from pathlib import Path
 
+import pandas as pd
+
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, log, run, wget_download
+from tbooo.utils import ensure_dirs, log, wget_download
+
+# ENA portal search API — sample-level metadata for SGDP study PRJEB9586
+# The /search endpoint supports result=sample; /filereport is file-only and rejects it.
+# `sex` is not a standard ENA sample field — we omit it and default to 0 (unknown).
+_ENA_SAMPLE_API = (
+    "https://www.ebi.ac.uk/ena/portal/api/search"
+    "?query=study_accession%3DPRJEB9586"
+    "&result=sample"
+    "&fields=sample_accession,sample_alias,sample_title"
+    "&format=tsv"
+    "&limit=0"
+)
+
+# ENA portal API — analysis-level records (processed files, including VCFs)
+_ENA_ANALYSIS_API = (
+    "https://www.ebi.ac.uk/ena/portal/api/filereport"
+    "?accession=PRJEB9586"
+    "&result=analysis"
+    "&fields=analysis_accession,sample_accession,submitted_ftp"
+    "&format=tsv"
+    "&limit=0"
+)
+
+# Mapping of known SGDP population name fragments → continental region
+# (best-effort; full table is in the SGDP Nature 2016 supplementary)
+_REGION_MAP: dict[str, str] = {
+    # West Eurasia
+    "Greek": "West Eurasia", "French": "West Eurasia", "Sardinian": "West Eurasia",
+    "Spanish": "West Eurasia", "English": "West Eurasia", "Scottish": "West Eurasia",
+    "Basque": "West Eurasia", "Italian": "West Eurasia", "Tuscan": "West Eurasia",
+    "Finnish": "West Eurasia", "Norwegian": "West Eurasia", "Estonian": "West Eurasia",
+    "Armenian": "West Eurasia", "Georgian": "West Eurasia", "Turkish": "West Eurasia",
+    "Iranian": "West Eurasia", "Druze": "West Eurasia", "Palestinian": "West Eurasia",
+    "Bedouin": "West Eurasia", "Maltese": "West Eurasia", "Cypriot": "West Eurasia",
+    # Africa
+    "Yoruba": "Africa", "Mandinka": "Africa", "Zulu": "Africa", "Ju_hoan": "Africa",
+    "Dinka": "Africa", "Luo": "Africa", "Esan": "Africa", "Mende": "Africa",
+    "Gambian": "Africa", "Somali": "Africa", "Ethiopian": "Africa", "Masai": "Africa",
+    "Hadza": "Africa", "Sandawe": "Africa", "BantuKenya": "Africa", "BantuSA": "Africa",
+    # East Asia
+    "Han": "East Asia", "Japanese": "East Asia", "Korean": "East Asia",
+    "Dai": "East Asia", "Vietnamese": "East Asia", "Cambodian": "East Asia",
+    "Mongolian": "East Asia", "She": "East Asia", "Miao": "East Asia",
+    # South Asia
+    "Bengali": "South Asia", "Punjabi": "South Asia", "Tamil": "South Asia",
+    "Telugu": "South Asia", "Sindhi": "South Asia", "Brahui": "South Asia",
+    "Burusho": "South Asia", "Hazara": "South Asia", "Kalash": "South Asia",
+    "Pathan": "South Asia", "Balochi": "South Asia",
+    # Central Asia / Siberia
+    "Buryat": "Central Asia / Siberia", "Yakut": "Central Asia / Siberia",
+    "Nganasan": "Central Asia / Siberia", "Selkup": "Central Asia / Siberia",
+    "Kazakh": "Central Asia / Siberia", "Kyrgyz": "Central Asia / Siberia",
+    "Tuvinian": "Central Asia / Siberia", "Eskimo": "Central Asia / Siberia",
+    # Oceania
+    "Papuan": "Oceania", "Australian": "Oceania", "Bougainville": "Oceania",
+    # Native Americas
+    "Maya": "Native Americas", "Quechua": "Native Americas", "Aymara": "Native Americas",
+    "Mixtec": "Native Americas", "Zapotec": "Native Americas", "Piapoco": "Native Americas",
+    "Surui": "Native Americas", "Karitiana": "Native Americas",
+}
 
 
-def download_cramps(cfg: Config, populations: list[str], workers: int) -> None:
-    """Download SGDP CRAM + index files listed in the ENA pointers file."""
-    out = cfg.sgdp_raw_dir()
-    ensure_dirs(out)
+def download_metadata(cfg: Config) -> None:
+    """Fetch SGDP sample metadata from the ENA portal API."""
+    out = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
+    if out.exists():
+        log(f"  skip (exists): {out.name}")
+        return
+    ensure_dirs(cfg.sgdp_raw_dir())
 
-    pointers_path = out / "ena.ftp.pointers.txt"
-    _fetch_pointers(cfg, pointers_path)
+    log("Fetching SGDP sample metadata from ENA…")
+    try:
+        tsv = _fetch_url(_ENA_SAMPLE_API)
+    except Exception as exc:
+        log(f"  ENA API failed: {exc}")
+        log("  Writing empty metadata file — SGDP rows will be absent from phenotype table.")
+        out.write_text("ena_accession\tsample_alias\tpopulation\tregion\tsex\n")
+        return
 
-    entries = _parse_pointers(pointers_path, populations)
-    log(f"SGDP: {len(entries)} samples to download (workers={workers})")
+    df = _parse_sample_response(tsv, cfg.sgdp_populations)
+    df.to_csv(out, sep="\t", index=False)
+    log(f"  wrote {out} ({len(df)} samples)")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {
-            pool.submit(_download_sample, entry, out, cfg.tools.wget): entry
-            for entry in entries
-        }
-        for fut in concurrent.futures.as_completed(futures):
-            entry = futures[fut]
-            try:
-                fut.result()
-            except Exception as exc:
-                log(f"  ERROR downloading {entry['sample']}: {exc}")
 
-    log(f"SGDP download complete → {out}")
+def download_vcfs(cfg: Config) -> None:
+    """Download per-sample phased VCF files from ENA analysis results for PRJEB9586."""
+    vcf_dir = cfg.sgdp_vcf_dir()
+    ensure_dirs(vcf_dir)
+
+    # Resolve population filter against the metadata table
+    allowed: set[str] | None = None
+    if cfg.sgdp_populations:
+        samples_tsv = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
+        if not samples_tsv.exists():
+            download_metadata(cfg)
+        if samples_tsv.exists() and samples_tsv.stat().st_size > 0:
+            meta = pd.read_csv(samples_tsv, sep="\t")
+            allowed = set(meta.loc[meta["population"].isin(cfg.sgdp_populations), "ena_accession"])
+            log(f"  Population filter active: {len(allowed)} samples from {len(cfg.sgdp_populations)} populations")
+
+    log("Querying ENA for SGDP VCF analysis files (PRJEB9586)…")
+    try:
+        url_map = _fetch_vcf_urls(allowed)
+    except Exception as exc:
+        log(f"  ENA analysis query failed: {exc}")
+        log("  Cannot resolve SGDP VCF URLs automatically.")
+        log("  Obtain files manually from:")
+        log("    https://www.internationalgenome.org/data-portal/data-collection/SGDP/")
+        return
+
+    if not url_map:
+        log("  No VCF analysis files found in ENA for PRJEB9586.")
+        log("  Obtain files manually from:")
+        log("    https://www.internationalgenome.org/data-portal/data-collection/SGDP/")
+        return
+
+    log(f"  Found {len(url_map)} VCF file(s) to download.")
+    for filename, url in sorted(url_map.items()):
+        dest = vcf_dir / filename
+        if dest.exists():
+            log(f"  skip (exists): {filename}")
+            continue
+        log(f"  downloading {filename}…")
+        wget_download(url, dest, tool_wget=cfg.tools.wget)
+        # index
+        from tbooo.utils import run
+        run([cfg.tools.bcftools, "index", "--tbi", str(dest)])
+
+    log("SGDP VCF download complete.")
 
 
 # ── Internals ─────────────────────────────────────────────────────────────────
 
-def _fetch_pointers(cfg: Config, dest: Path) -> None:
-    if dest.exists():
-        log(f"  skip (exists): {dest.name}")
-        return
-    log(f"Fetching SGDP ENA pointers file…")
-    wget_download(cfg.sgdp_ena_pointers_url, dest, tool_wget=cfg.tools.wget)
+def _fetch_url(url: str) -> str:
+    with urllib.request.urlopen(url, timeout=60) as resp:
+        return resp.read().decode("utf-8")
 
 
-def _parse_pointers(path: Path, populations: list[str]) -> list[dict]:
-    """Return list of {sample, population, cram_url, crai_url} dicts."""
-    entries: list[dict] = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+def _fetch_vcf_urls(allowed_accessions: set[str] | None) -> dict[str, str]:
+    """Return {filename: https_url} for all VCF analysis files in PRJEB9586."""
+    tsv = _fetch_url(_ENA_ANALYSIS_API)
+    lines = [l for l in tsv.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return {}
+
+    header = lines[0].split("\t")
+    result: dict[str, str] = {}
+    for line in lines[1:]:
+        parts = dict(zip(header, line.split("\t")))
+        sample_acc = parts.get("sample_accession", "").strip()
+        ftp_field = parts.get("submitted_ftp", "").strip()
+
+        if allowed_accessions is not None and sample_acc not in allowed_accessions:
+            continue
+
+        for raw_url in ftp_field.split(";"):
+            raw_url = raw_url.strip()
+            if not raw_url.endswith(".vcf.gz"):
                 continue
-            # Expected columns: sample_name  population  ftp_url  md5  ...
-            parts = line.split("\t")
-            if len(parts) < 3:
-                continue
-            sample, population, url = parts[0], parts[1], parts[2]
-            if populations and population not in populations:
-                continue
-            if not url.endswith(".cram"):
-                continue
-            entries.append({
-                "sample": sample,
-                "population": population,
-                "cram_url": url,
-                "crai_url": url + ".crai",
-            })
-    return entries
+            filename = raw_url.rsplit("/", 1)[-1]
+            # Prefer HTTPS over FTP for wget compatibility
+            https_url = raw_url.replace("ftp://ftp.sra.ebi.ac.uk", "https://ftp.sra.ebi.ac.uk")
+            result[filename] = https_url
+
+    return result
 
 
-def _download_sample(entry: dict, out: Path, wget_bin: str) -> None:
-    sample = entry["sample"]
-    cram_url = entry["cram_url"]
-    crai_url = entry["crai_url"]
+def _parse_sample_response(tsv: str, filter_populations: list[str]) -> pd.DataFrame:
+    lines = [l for l in tsv.splitlines() if l.strip()]
+    if not lines:
+        return pd.DataFrame(columns=["ena_accession", "sample_alias", "population", "region", "sex"])
 
-    # preserve original filename from URL
-    cram_name = cram_url.rsplit("/", 1)[-1]
-    crai_name = crai_url.rsplit("/", 1)[-1]
+    header = lines[0].split("\t")
+    rows = [dict(zip(header, l.split("\t"))) for l in lines[1:]]
+    df = pd.DataFrame(rows)
 
-    cram_path = out / cram_name
-    crai_path = out / crai_name
+    df = df.rename(columns={
+        "sample_accession": "ena_accession",
+        "sample_title": "population_raw",
+    })
 
-    if not cram_path.exists():
-        log(f"  [{sample}] downloading CRAM…")
-        wget_download(cram_url, cram_path, tool_wget=wget_bin)
-    if not crai_path.exists():
-        log(f"  [{sample}] downloading CRAI…")
-        wget_download(crai_url, crai_path, tool_wget=wget_bin)
+    # Population: SGDP aliases are formatted as "<Population>_<ID>" (e.g. "French_B_French-1")
+    if "sample_alias" in df.columns:
+        df["population"] = df["sample_alias"].str.extract(r"^([A-Za-z_]+)", expand=False)
+    elif "population_raw" in df.columns:
+        df["population"] = df["population_raw"]
+    else:
+        df["population"] = "Unknown"
+
+    df["region"] = df["population"].apply(_infer_region)
+    df["sex"] = 0  # ENA search does not expose sex as a standard field
+
+    if filter_populations:
+        df = df[df["population"].isin(filter_populations)]
+
+    return df[["ena_accession", "sample_alias", "population", "region", "sex"]].drop_duplicates("ena_accession")
+
+
+def _infer_region(population: str) -> str:
+    for fragment, region in _REGION_MAP.items():
+        if fragment.lower() in population.lower():
+            return region
+    return "Unknown"

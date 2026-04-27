@@ -11,15 +11,15 @@ Usage:
 
 Full pipeline DAG:
     download_phase3_vcfs
-    download_nygc_vcfs       ─┐
-    download_sgdp_cramps      │
-    download_reference        │
-         │                    │
-    assign_eids               │
-         │           ─────────┘
-    ┌────┴────┬───────┬───────┬───────────┐
-  array   imputed   wgs_crams wgs_pvcf   wes
-    └────┬────┴───────┴─────────────────────┘
+    download_nygc_vcfs    ─┐
+    download_sgdp_meta     │   (metadata only — no CRAMs)
+    download_reference     │
+         │                 │
+    assign_eids            │
+         │        ─────────┘
+    ┌────┴────┬───────┬──────────┬────┐
+  array   imputed  wgs_crams  wgs_pvcf wes
+    └────┬────┴───────┴──────────────────┘
       phenotypes
          │
         qc
@@ -89,6 +89,10 @@ rule all_wgs:
     input:
         expand(f"{WGS_DIR}/ukb23370_c{{chrom}}_b0_v1.pvcf.gz", chrom=CHROMS),
 
+rule all_sgdp_pvcf:
+    input:
+        expand(f"{SGDP_RAW}/pvcf/sgdp_c{{chrom}}.pvcf.gz", chrom=CHROMS),
+
 # ── Download rules ────────────────────────────────────────────────────────────
 
 rule download_phase3_vcf:
@@ -153,9 +157,8 @@ rule download_nygc_panel:
 rule download_reference:
     output:
         exome_bed   = _cfg["exome_bed"],
-        grch37_fai  = f"{REF_DIR}/GRCh37/human_g1k_v37.fasta.gz.fai",
+        grch37_fai  = f"{REF_DIR}/GRCh37/human_g1k_v37.fasta.fai",
         grch38_fai  = f"{REF_DIR}/GRCh38/GRCh38_full_analysis_set_plus_decoy_hla.fa.fai",
-        maps_flag   = f"{REF_DIR}/genetic_maps/.done",
     shell:
         "tbooo --config config.yaml download reference"
 
@@ -163,10 +166,13 @@ rule download_reference:
 
 rule assign_eids:
     input:
-        panel = f"{KG_RAW}/20201028_3202_samples_5_subpopulations.tsv",
+        panel    = f"{KG_RAW}/20201028_3202_samples_5_subpopulations.tsv",
+        sgdp_meta = f"{SGDP_RAW}/sgdp_samples.tsv",
     output:
-        kg_map     = f"{META}/eid_map_1kg.tsv",
-        kg_rename  = f"{META}/vcf_sample_rename_1kg.txt",
+        kg_map      = f"{META}/eid_map_1kg.tsv",
+        kg_rename   = f"{META}/vcf_sample_rename_1kg.txt",
+        sgdp_map    = f"{META}/eid_map_sgdp.tsv",
+        sgdp_rename = f"{META}/vcf_sample_rename_sgdp.txt",
     shell:
         "tbooo --config config.yaml map eids"
 
@@ -219,6 +225,26 @@ rule wgs_crams:
         tbooo --config config.yaml map wgs --no-pvcf
         touch {output.flag}
         """
+
+rule download_sgdp:
+    output:
+        metadata = f"{SGDP_RAW}/sgdp_samples.tsv",
+        vcf_flag = f"{SGDP_RAW}/vcf/.downloaded",
+    shell:
+        """
+        tbooo --config config.yaml download sgdp
+        touch {output.vcf_flag}
+        """
+
+rule sgdp_pvcf_chrom:
+    input:
+        vcf_flag  = f"{SGDP_RAW}/vcf/.downloaded",
+        rename    = f"{META}/vcf_sample_rename_sgdp.txt",
+    output:
+        pvcf  = f"{SGDP_RAW}/pvcf/sgdp_c{{chrom}}.pvcf.gz",
+        index = f"{SGDP_RAW}/pvcf/sgdp_c{{chrom}}.pvcf.gz.tbi",
+    shell:
+        "tbooo --config config.yaml map wgs --no-croms --no-pvcf --sgdp-pvcf --chroms {wildcards.chrom}"
 
 # ── WES pipeline ─────────────────────────────────────────────────────────────
 

@@ -18,10 +18,8 @@ kg_nygc_date: "2020-08-05"
 kg_nygc_base_url: "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased"
 
 # ─── SGDP ─────────────────────────────────────────────────────────────────────
-sgdp_ena_pointers_url: "https://ftp.sra.ebi.ac.uk/vol1/ERZ000/ERZ000030/ena.ftp.pointers.txt"
-# Maximum simultaneous CRAM downloads (SGDP ENA has rate limits)
-sgdp_download_workers: 4
-# Download only these populations (empty list = all 279 public samples)
+# Metadata only — no CRAM or VCF downloads.
+# Filter to specific populations (empty list = all 300 samples in PRJEB9586).
 sgdp_populations: []
 
 # ─── EID ranges ───────────────────────────────────────────────────────────────
