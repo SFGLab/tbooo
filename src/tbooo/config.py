@@ -131,6 +131,8 @@ class Config:
 
     def nygc_vcf(self, chrom: str) -> Path:
         date = self.kg_nygc_date
+        if chrom == "X":
+            return self.kg_raw_dir() / f"CCDG_14151_B01_GRM_WGS_{date}_chrX.filtered.eagle2-phased.v2.vcf.gz"
         return self.kg_raw_dir() / f"CCDG_14151_B01_GRM_WGS_{date}_chr{chrom}.filtered.shapeit2-duohmm-phased.vcf.gz"
 
     def array_stem(self, chrom: str) -> Path:

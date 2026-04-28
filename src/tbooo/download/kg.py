@@ -72,9 +72,8 @@ def download_nygc(cfg: Config, chroms: list[str]) -> None:
 
     tasks = []
     for chrom in chroms:
-        vcf_name = _NYGC_VCF.format(date=date, chrom=chrom)
-        vcf_url = f"{base}/{vcf_name}"
-        vcf_path = out / vcf_name
+        vcf_path = cfg.nygc_vcf(chrom)
+        vcf_url = f"{base}/{vcf_path.name}"
         tasks.append((vcf_url, vcf_path, wget))
         tasks.append((f"{vcf_url}.tbi", Path(str(vcf_path) + ".tbi"), wget))
     parallel_download(tasks, cfg.download_workers)

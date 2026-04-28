@@ -165,6 +165,9 @@ rule download_phase3_panel:
         """
 
 rule download_nygc_vcf:
+    # Autosome-only rule — chrX uses eagle2-phased.v2 naming (see rule below).
+    wildcard_constraints:
+        chrom = "|".join(str(c) for c in _cfg["autosomes"]),
     output:
         vcf   = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chr{{chrom}}.filtered.shapeit2-duohmm-phased.vcf.gz",
         index = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chr{{chrom}}.filtered.shapeit2-duohmm-phased.vcf.gz.tbi",
@@ -179,6 +182,23 @@ rule download_nygc_vcf:
         wget --continue -q --show-progress \
              -O {output.index} \
              {params.base}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chr{wildcards.chrom}.filtered.shapeit2-duohmm-phased.vcf.gz.tbi
+        """
+
+rule download_nygc_chrX_vcf:
+    output:
+        vcf   = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chrX.filtered.eagle2-phased.v2.vcf.gz",
+        index = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chrX.filtered.eagle2-phased.v2.vcf.gz.tbi",
+    params:
+        base = _cfg["kg_nygc_base_url"],
+    shell:
+        """
+        mkdir -p {KG_RAW}
+        wget --continue -q --show-progress \
+             -O {output.vcf} \
+             {params.base}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chrX.filtered.eagle2-phased.v2.vcf.gz
+        wget --continue -q --show-progress \
+             -O {output.index} \
+             {params.base}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chrX.filtered.eagle2-phased.v2.vcf.gz.tbi
         """
 
 rule download_nygc_panel:
@@ -278,7 +298,9 @@ rule wgs_gvcfs:
         """
 
 rule wgs_pvcf_chrom:
-    # Combined pVCF (NYGC + SGDP merged) → Field 23370
+    # Combined pVCF (NYGC + SGDP merged) → Field 23370 (autosomes)
+    wildcard_constraints:
+        chrom = "|".join(str(c) for c in _cfg["autosomes"]),
     input:
         nygc_vcf  = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chr{{chrom}}.filtered.shapeit2-duohmm-phased.vcf.gz",
         vcf_flag  = f"{SGDP_RAW}/vcf/.downloaded",
@@ -289,6 +311,19 @@ rule wgs_pvcf_chrom:
         index = f"{WGS_DIR}/ukb23370_c{{chrom}}_b0_v1.pvcf.gz.tbi",
     shell:
         "tbooo --config config.yaml map wgs --no-croms --no-gvcf --chroms {wildcards.chrom}"
+
+rule wgs_pvcf_chrX:
+    # Combined pVCF → Field 23370 (chrX, uses eagle2-phased.v2 NYGC file)
+    input:
+        nygc_vcf  = f"{KG_RAW}/CCDG_14151_B01_GRM_WGS_{KG_NYGC_DATE}_chrX.filtered.eagle2-phased.v2.vcf.gz",
+        vcf_flag  = f"{SGDP_RAW}/vcf/.downloaded",
+        kg_rename = f"{META}/vcf_sample_rename_1kg.txt",
+        sg_rename = f"{META}/vcf_sample_rename_sgdp.txt",
+    output:
+        pvcf  = f"{WGS_DIR}/ukb23370_cX_b0_v1.pvcf.gz",
+        index = f"{WGS_DIR}/ukb23370_cX_b0_v1.pvcf.gz.tbi",
+    shell:
+        "tbooo --config config.yaml map wgs --no-croms --no-gvcf --chroms X"
 
 # ── WES pipeline ─────────────────────────────────────────────────────────────
 
