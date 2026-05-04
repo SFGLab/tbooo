@@ -136,9 +136,17 @@ def _download_grch37(cfg: Config) -> None:
         log("Downloading GRCh37 reference FASTA (RAZF-compressed)…")
         wget_download(_GRCH37_FASTA_URL, fasta_gz, tool_wget=cfg.tools.wget)
 
-    # gunzip ignores the RAZF trailer with a "trailing garbage ignored" warning
-    log("  decompressing RAZF FASTA with gunzip (trailing garbage warning is expected)…")
-    run(["gunzip", "--force", "--keep", str(fasta_gz)])
+    # RAZF format: gzip data followed by an index trailer that gunzip doesn't
+    # understand. gunzip exits 2 ("trailing garbage ignored") but the output is
+    # valid, so we allow exit codes 0 and 2 and verify the file afterwards.
+    log("  decompressing RAZF FASTA (trailing garbage warning from gunzip is expected)…")
+    result = run(["gunzip", "--force", "--keep", str(fasta_gz)], check=False)
+    if result.returncode not in (0, 2):
+        raise RuntimeError(
+            f"gunzip failed with exit code {result.returncode} on {fasta_gz}"
+        )
+    if not fasta.exists() or fasta.stat().st_size == 0:
+        raise RuntimeError(f"gunzip produced no output for {fasta_gz}")
 
     run([cfg.tools.samtools, "faidx", str(fasta)])
     log(f"  GRCh37 FASTA ready → {fasta}")
