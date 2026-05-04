@@ -110,10 +110,16 @@ sudo install qctool_v2.2.0-CentOS\ Linux7.8.2003-x86_64/qctool /usr/local/bin/
 # ── 5. bgenix ─────────────────────────────────────────────────────────────────
 # Part of the BGEN reference implementation — build from source.
 # Project page: https://enkre.net/cgi-bin/code/bgen
-sudo apt-get install -y libbz2-dev libboost-iostreams-dev libboost-filesystem-dev python3
-git clone https://enkre.net/cgi-bin/code/bgen bgen-src
-cd bgen-src && python3 waf configure && python3 waf
-sudo install build/bgenix /usr/local/bin/
+# Only requires a C++11 compiler (already in build-essential); deps are bundled.
+wget http://code.enkre.net/bgen/tarball/release/bgen.tgz
+tar -xzf bgen.tgz
+mv bgen.tgz bgen
+cd bgen
+# The release tarball uses std::ios::streampos which GCC 11+ rejects; patch before building.
+sed -i 's/std::ios::streampos/std::streampos/g' src/View.cpp
+./waf configure
+./waf
+sudo install build/apps/bgenix /usr/local/bin/
 cd ..
 
 # ── 6. KING ───────────────────────────────────────────────────────────────────
