@@ -86,6 +86,16 @@ def build_phenotype_table(cfg: Config) -> None:
 
     df = pd.concat(frames, ignore_index=True)
 
+    # Merge expression PCs if already computed
+    pcs_path = cfg.metadata_dir() / "geuvadis_expression_pcs.tsv"
+    if pcs_path.exists():
+        pcs = pd.read_csv(pcs_path, sep="\t")
+        df = df.merge(pcs, on="eid", how="left")
+        n_matched = pcs["eid"].isin(df["eid"]).sum()
+        log(f"  merged GEUVADIS expression PCs: {n_matched}/{len(df)} rows")
+    else:
+        log("  GEUVADIS PCs not found; run `tbooo map geuvadis` to add expression scores")
+
     # Add null columns for commonly referenced clinical fields
     for col in _NULL_FIELDS:
         df[col] = pd.NA

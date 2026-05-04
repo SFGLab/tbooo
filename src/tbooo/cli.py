@@ -3,6 +3,7 @@
 Usage:
     tbooo download 1kg        Download 1000 Genomes Phase 3 + NYGC 30x data
     tbooo download sgdp       Download SGDP CRAM files
+    tbooo download geuvadis   Download GEUVADIS GD462 RPKM expression matrix
     tbooo download reference  Download reference files (exome BED, genetic maps)
 
     tbooo map eids            Assign synthetic EIDs to all samples
@@ -10,6 +11,7 @@ Usage:
     tbooo map imputed         Build UKB-mirrored BGEN imputed files (Field 22828)
     tbooo map wgs             Build UKB-mirrored WGS CRAMs + pVCF (Field 23149/23370)
     tbooo map wes             Build UKB-mirrored WES PLINK/BGEN files (Field 23157)
+    tbooo map geuvadis        Compute expression PCA and add geuvadis_pc* to participant.parquet
     tbooo map phenotypes      Build synthetic phenotype Parquet table
     tbooo map qc              Build sample QC and relatedness files
 
@@ -76,6 +78,14 @@ def download_sgdp(config, do_vcf):
     download_metadata(cfg)
     if do_vcf:
         download_vcfs(cfg)
+
+
+@download.command("geuvadis")
+@CONFIG_OPTION
+def download_geuvadis(config):
+    """Download GEUVADIS GD462 RPKM gene expression matrix."""
+    from tbooo.download.geuvadis import download_expression
+    download_expression(_cfg(config))
 
 
 @download.command("reference")
@@ -153,6 +163,14 @@ def map_wes(config, chroms):
     cfg = _cfg(config)
     chrom_list = chroms.split(",") if chroms else [str(c) for c in cfg.autosomes]
     run_wes_pipeline(cfg, chrom_list)
+
+
+@map.command("geuvadis")
+@CONFIG_OPTION
+def map_geuvadis(config):
+    """Compute GEUVADIS expression PCA and merge scores into participant.parquet."""
+    from tbooo.pipeline.geuvadis import build_expression_pcs
+    build_expression_pcs(_cfg(config))
 
 
 @map.command("phenotypes")

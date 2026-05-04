@@ -110,6 +110,9 @@ class Config:
     def sgdp_raw_dir(self) -> Path:
         return self.data_dir / "raw" / "sgdp"
 
+    def geuvadis_raw_dir(self) -> Path:
+        return self.data_dir / "raw" / "geuvadis"
+
     def sgdp_vcf_dir(self) -> Path:
         return self.sgdp_raw_dir() / "vcf"
 
