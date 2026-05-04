@@ -49,8 +49,9 @@ data/
 | **1KGP Phase 3** | Array + imputed genotypes | 2,504 unrelated | GRCh37 |
 | **1KGP NYGC 30x** | WGS CRAMs, cohort pVCF, WES simulation | 3,202 (incl. trios) | GRCh38 |
 | **SGDP** | Per-sample VCFs + phenotype diversity | 300 (142 populations) | GRCh38 |
+| **GEUVADIS** | Gene expression PCA → custom phenotype signal | 462 (5 populations, all in 1KGP) | GRCh37 |
 
-SGDP CRAMs (~14 TB) are not downloaded. Per-sample phased VCF files are fetched from ENA analysis results and merged into per-chromosome pVCFs with EID renaming. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
+SGDP CRAMs (~14 TB) are not downloaded. Per-sample phased VCF files are fetched from ENA analysis results and merged into per-chromosome pVCFs with EID renaming. GEUVADIS data is downloaded as the pre-computed gene-level RPKM matrix (no raw reads); PCA scores are stored as `geuvadis_pc1`–`geuvadis_pc10` columns in `participant.parquet`. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
 
 ---
 
@@ -187,6 +188,7 @@ The synthetic phenotype table (`data/Showcase/participant.parquet`) follows UKB 
 | `p23149` | 23149 | WGS CRAM available (1KGP samples only) |
 | `p23151` | 23151 | Individual gVCF available (SGDP samples only) |
 | `p54_i0` | 54 | Assessment centre (synthetic) |
+| `geuvadis_pc1`–`geuvadis_pc10` | custom | Gene expression PC scores (462 1KGP samples only; null for all others) |
 
 Clinical fields (diagnoses, medications, hospital records, imaging) are present as null columns so downstream scripts that reference them do not break.
 

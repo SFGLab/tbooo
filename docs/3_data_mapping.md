@@ -1,6 +1,6 @@
-# Data Mapping: 1000 Genomes & Simons → UK Biobank Structure
+# Data Mapping: 1000 Genomes, Simons & GEUVADIS → UK Biobank Structure
 
-This document specifies exactly how data from the 1000 Genomes Project (1KGP) and Simons Genome Diversity Project (SGDP) is transformed and reorganized to mirror the UK Biobank (UKB) data structure on DNAnexus RAP. It is the authoritative reference for TBOOO's data pipeline decisions.
+This document specifies exactly how data from the 1000 Genomes Project (1KGP), Simons Genome Diversity Project (SGDP), and GEUVADIS RNA-seq project is transformed and reorganized to mirror the UK Biobank (UKB) data structure on DNAnexus RAP. It is the authoritative reference for TBOOO's data pipeline decisions.
 
 Cross-references: [1_ukb_structure.md](1_ukb_structure.md) for UKB format details, [2_data_sources.md](2_data_sources.md) for source data details.
 
@@ -20,6 +20,7 @@ TBOOO produces a directory tree and file set that structurally mirrors what a UK
 | WGS cohort pVCF | 23370–23384 | 1KGP NYGC 30x | Per-chromosome multi-sample VCFs reformatted as pVCF blocks |
 | WES cohort PLINK/BGEN | 23157 | 1KGP NYGC 30x | WGS VCFs intersected with UKB exome capture BED → PLINK/BGEN |
 | Phenotypic data (Parquet) | various | 1KGP + SGDP metadata | Sample panel files → synthetic UKB field columns |
+| Expression PCA (Parquet) | custom | GEUVADIS | Gene-level RPKM matrix → log-transform → PCA → top 10 PCs per sample |
 | Sample QC file | — | 1KGP + SGDP | Computed from KING + PCA on merged dataset |
 | Relatedness file | — | 1KGP pedigree | `.ped` family structure + KING kinship estimates |
 
@@ -28,6 +29,7 @@ TBOOO produces a directory tree and file set that structurally mirrors what a UK
 - **Array + imputation** use GRCh37 coordinates, matching 1KGP Phase 3 natively (no liftover needed).
 - **WGS + WES** use GRCh38 coordinates, matching 1KGP NYGC 30x and SGDP natively.
 - **SGDP samples** supplement 1KGP in the WGS layer only, adding geographic diversity beyond 1KGP's 26 populations.
+- **GEUVADIS expression PCA** is added as a custom phenotype-like signal for the 462 1KGP samples with matched RNA-seq. It has no direct UKB field counterpart; column names use the `geuvadis_` prefix.
 - All samples are assigned synthetic 7-digit EIDs in the range 1,000,000–6,999,999, mirroring UKB pseudonymization.
 - Only metadata-derivable phenotype fields are simulated; clinical phenotypes (disease diagnoses, hospital records) are left empty or omitted.
 
@@ -453,8 +455,8 @@ Schema follows the UKB column naming convention: `p<FIELD-ID>_i<INSTANCE-ID>_a<A
 
 The following UKB fields can be directly or approximately populated:
 
-| UKB Column | Field ID | Description | Source in 1KGP/SGDP | Notes |
-|-----------|----------|-------------|---------------------|-------|
+| UKB Column | Field ID | Description | Source in 1KGP/SGDP/GEUVADIS | Notes |
+|-----------|----------|-------------|-------------------------------|-------|
 | `eid` | — | Participant identifier | Synthetic EID | Primary key |
 | `p31` | 31 | Sex | `gender` column in panel file | 1=male, 2=female |
 | `p21000_i0` | 21000 | Ethnic background | Superpopulation code (see §9.1) | Instance 0; approximate |
@@ -465,6 +467,7 @@ The following UKB fields can be directly or approximately populated:
 | `p22828` | 22828 | Imputed genotypes available | 1 for all samples | Binary flag |
 | `p23149` | 23149 | WGS CRAM available | 1 for all samples with CRAM | Binary flag |
 | `p54_i0` | 54 | UK Biobank assessment centre | Population code (see §9.2) | Approximate; instance 0 |
+| `geuvadis_pc1` – `geuvadis_pc10` | custom | Gene expression PC scores | GEUVADIS RPKM PCA (see §10) | null for non-GEUVADIS samples |
 
 ### 9.1 Population → Ethnic Background (Field 21000)
 
@@ -518,7 +521,85 @@ The following commonly-used UKB fields have no equivalent in 1KGP/SGDP metadata 
 
 ---
 
-## 10. Sample QC File (ukb_sqc_v2.txt)
+## 10. Gene Expression PCA (GEUVADIS)
+
+### Strategy
+
+The GEUVADIS RPKM matrix provides gene expression profiles for 462 1KGP individuals across 5 populations (CEU, FIN, GBR, TSI, YRI). PCA on the normalized expression matrix produces per-sample scores that capture the dominant axes of transcriptomic variation — driven by a mix of population ancestry, cell line biology, and gene regulatory effects. These scores are stored as custom phenotype columns in `participant.parquet`, giving pipelines a continuous, multi-dimensional signal to work with alongside the binary metadata-derived fields.
+
+This is not a proxy for any UKB field. It is an additional signal enabled by the GEUVADIS–1KGP sample overlap.
+
+### Source
+
+| Attribute | Value |
+|-----------|-------|
+| Source dataset | GEUVADIS (Lappalainen et al. 2013) |
+| Source file | `GD462.GeneQuantRPKM.50FN.samplename.recast.txt.gz` |
+| Samples | 462 (all in 1KGP Phase 3 unrelated set) |
+| Genes | 23,722 |
+
+### Processing steps
+
+1. **Download** the GD462 RPKM matrix from the GEUVADIS FTP (`ftp://ftp.ebi.ac.uk/pub/databases/microarray/data/experiment/GEUV/E-GEUV-1/`)
+
+2. **Filter genes** — retain only genes with median RPKM ≥ 0.1 across all 462 samples (~13,000–15,000 genes typically pass). Low-expressed genes contribute mostly noise to PCA.
+
+3. **Log-transform** — apply log₂(RPKM + 0.1) to reduce the dynamic range before PCA.
+
+4. **Sample filter** — restrict columns to GEUVADIS sample IDs that appear in `eid_map_1kg.tsv`. All 462 samples should be present; any absent sample is silently dropped.
+
+5. **PCA** — run sklearn `PCA(n_components=10)` on the transposed (samples × genes) matrix. Center but do not scale (expression variance is informative).
+
+6. **Store scores** — join the 10 PC score columns to `participant.parquet` on `eid`, using `geuvadis_pc1`–`geuvadis_pc10` column names. Samples not in GEUVADIS (all SGDP samples and 1KGP samples outside the 5 populations) receive null.
+
+### Output columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `geuvadis_pc1` | float64 | Score on expression PC 1 (typically captures EUR/AFR stratification) |
+| `geuvadis_pc2` | float64 | Score on expression PC 2 |
+| … | … | … |
+| `geuvadis_pc10` | float64 | Score on expression PC 10 |
+
+Variance explained by each PC is stored in `data/metadata/geuvadis_pca_variance.tsv` (columns: `pc`, `variance_explained`, `cumulative_variance`) for reference.
+
+### Example code
+
+```python
+import pandas as pd
+import numpy as np
+from sklearn.decomposition import PCA
+
+rpkm = pd.read_csv("GD462.GeneQuantRPKM.50FN.samplename.recast.txt.gz", sep="\t", index_col=0)
+
+# rows = genes, cols = samples → filter low-expressed genes
+rpkm = rpkm.loc[rpkm.median(axis=1) >= 0.1]
+
+# log-transform; transpose to (samples × genes)
+X = np.log2(rpkm.T + 0.1)
+
+pca = PCA(n_components=10)
+scores = pca.fit_transform(X)  # shape (n_samples, 10)
+
+pc_df = pd.DataFrame(
+    scores,
+    index=X.index,
+    columns=[f"geuvadis_pc{i}" for i in range(1, 11)],
+)
+pc_df.index.name = "sample_id"
+```
+
+### Coverage and null handling
+
+| Sample group | GEUVADIS coverage | Parquet value |
+|-------------|-------------------|---------------|
+| 1KGP CEU, FIN, GBR, TSI, YRI | 462 samples | PC score (float) |
+| 1KGP other populations (EAS, SAS, AMR, other AFR) | 0 | null |
+| SGDP samples | 0 | null |
+
+---
+
+## 11. Sample QC File (ukb_sqc_v2.txt)
 
 ### Format
 
@@ -551,7 +632,7 @@ plink2 \
 
 ---
 
-## 11. Relatedness File (ukb_rel.txt)
+## 12. Relatedness File (ukb_rel.txt)
 
 ### Format
 
@@ -593,7 +674,7 @@ python src/data/replace_ids_in_rel.py \
 
 ---
 
-## 12. Reference Genome Handling
+## 13. Reference Genome Handling
 
 All TBOOO data is organized into two coordinate systems, matching UKB:
 
@@ -617,7 +698,7 @@ data/reference/GRCh38/GRCh38DH.fa        # for decoding GRCh38 CRAMs
 
 ---
 
-## 13. Tool Requirements
+## 14. Tool Requirements
 
 | Tool | Version | Purpose |
 |------|---------|---------|
@@ -629,12 +710,14 @@ data/reference/GRCh38/GRCh38DH.fa        # for decoding GRCh38 CRAMs
 | samtools | ≥ 1.17 | CRAM reheadering, index generation |
 | Python | ≥ 3.10 | Metadata processing, ID remapping scripts |
 | pandas / pyarrow | — | Parquet phenotype table generation |
+| scikit-learn | ≥ 1.3 | PCA for GEUVADIS expression scores |
+| numpy | — | Log-transform and matrix operations for expression PCA |
 
 ---
 
-## 14. What Cannot Be Simulated
+## 15. What Cannot Be Simulated
 
-The following UKB data types have no equivalent in 1KGP or SGDP and are out of scope for TBOOO:
+The following UKB data types have no equivalent in 1KGP, SGDP, or GEUVADIS and are out of scope for TBOOO:
 
 | UKB Data Type | Reason not simulable |
 |---------------|---------------------|
@@ -651,7 +734,7 @@ The following UKB data types have no equivalent in 1KGP or SGDP and are out of s
 
 ---
 
-## 15. Limitations and Caveats
+## 16. Limitations and Caveats
 
 | Limitation | Impact |
 |-----------|--------|
@@ -662,3 +745,5 @@ The following UKB data types have no equivalent in 1KGP or SGDP and are out of s
 | No WES capture simulation artifacts | Intersection of WGS variants with exome BED does not reproduce capture efficiency gradients, off-target reads, or GC-bias artifacts |
 | Phenotype depth | Only ~10 phenotype fields are populated; all clinical fields are null |
 | No longitudinal data | All samples have a single timepoint; no repeat assessments |
+| GEUVADIS coverage is partial | Only 462 samples from 5 populations (EUR + YRI) have expression PCA scores; ~3,000 samples in the cohort receive null for all `geuvadis_pc*` columns |
+| Expression PCA reflects LCL biology | GEUVADIS profiles are from EBV-transformed cell lines, not primary tissue; expression patterns reflect cell line artifacts as well as population biology |

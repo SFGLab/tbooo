@@ -1,8 +1,8 @@
-"""Download SGDP VCF files and sample metadata from ENA.
+"""Download SGDP VCF files and sample metadata.
 
-SGDP raw CRAMs (~14 TB) are not downloaded. Instead we fetch:
-  - Sample metadata (ENA sample API, ~KB)
-  - Per-sample phased VCF files from ENA analysis results (~few hundred GB)
+Metadata is fetched from the IGSR portal API (internationalgenome.org).
+Per-sample phased VCF files are fetched from ENA analysis results for PRJEB9586.
+SGDP CRAMs (~14 TB) are not downloaded.
 
 Outputs:
     data/raw/sgdp/sgdp_samples.tsv
@@ -12,6 +12,7 @@ Outputs:
 
 from __future__ import annotations
 
+import json
 import urllib.request
 from pathlib import Path
 
@@ -20,17 +21,24 @@ import pandas as pd
 from tbooo.config import Config
 from tbooo.utils import ensure_dirs, log, parallel_download, run, wget_download
 
-# ENA portal search API — sample-level metadata for SGDP study PRJEB9586
-# The /search endpoint supports result=sample; /filereport is file-only and rejects it.
-# `sex` is not a standard ENA sample field — we omit it and default to 0 (unknown).
-_ENA_SAMPLE_API = (
-    "https://www.ebi.ac.uk/ena/portal/api/search"
-    "?query=study_accession%3DPRJEB9586"
-    "&result=sample"
-    "&fields=sample_accession,sample_alias,sample_title"
-    "&format=tsv"
-    "&limit=0"
-)
+# IGSR portal API — returns all samples across all collections
+_IGSR_SAMPLE_API = "https://www.internationalgenome.org/api/beta/sample/_search/igsr_samples.tsv"
+_IGSR_PAYLOAD = {
+    "fields": [
+        "name", "sex", "biosampleId",
+        "populations.code", "populations.name",
+        "populations.superpopulationCode", "populations.superpopulationName",
+        "populations.elasticId",
+        "dataCollections.title",
+    ],
+    "column_names": [
+        "Sample name", "Sex", "Biosample ID",
+        "Population code", "Population name",
+        "Superpopulation code", "Superpopulation name",
+        "Population elastic ID",
+        "Data collections",
+    ],
+}
 
 # ENA portal API — analysis-level records (processed files, including VCFs)
 _ENA_ANALYSIS_API = (
@@ -42,63 +50,32 @@ _ENA_ANALYSIS_API = (
     "&limit=0"
 )
 
-# Mapping of known SGDP population name fragments → continental region
-# (best-effort; full table is in the SGDP Nature 2016 supplementary)
-_REGION_MAP: dict[str, str] = {
-    # West Eurasia
-    "Greek": "West Eurasia", "French": "West Eurasia", "Sardinian": "West Eurasia",
-    "Spanish": "West Eurasia", "English": "West Eurasia", "Scottish": "West Eurasia",
-    "Basque": "West Eurasia", "Italian": "West Eurasia", "Tuscan": "West Eurasia",
-    "Finnish": "West Eurasia", "Norwegian": "West Eurasia", "Estonian": "West Eurasia",
-    "Armenian": "West Eurasia", "Georgian": "West Eurasia", "Turkish": "West Eurasia",
-    "Iranian": "West Eurasia", "Druze": "West Eurasia", "Palestinian": "West Eurasia",
-    "Bedouin": "West Eurasia", "Maltese": "West Eurasia", "Cypriot": "West Eurasia",
-    # Africa
-    "Yoruba": "Africa", "Mandinka": "Africa", "Zulu": "Africa", "Ju_hoan": "Africa",
-    "Dinka": "Africa", "Luo": "Africa", "Esan": "Africa", "Mende": "Africa",
-    "Gambian": "Africa", "Somali": "Africa", "Ethiopian": "Africa", "Masai": "Africa",
-    "Hadza": "Africa", "Sandawe": "Africa", "BantuKenya": "Africa", "BantuSA": "Africa",
-    # East Asia
-    "Han": "East Asia", "Japanese": "East Asia", "Korean": "East Asia",
-    "Dai": "East Asia", "Vietnamese": "East Asia", "Cambodian": "East Asia",
-    "Mongolian": "East Asia", "She": "East Asia", "Miao": "East Asia",
-    # South Asia
-    "Bengali": "South Asia", "Punjabi": "South Asia", "Tamil": "South Asia",
-    "Telugu": "South Asia", "Sindhi": "South Asia", "Brahui": "South Asia",
-    "Burusho": "South Asia", "Hazara": "South Asia", "Kalash": "South Asia",
-    "Pathan": "South Asia", "Balochi": "South Asia",
-    # Central Asia / Siberia
-    "Buryat": "Central Asia / Siberia", "Yakut": "Central Asia / Siberia",
-    "Nganasan": "Central Asia / Siberia", "Selkup": "Central Asia / Siberia",
-    "Kazakh": "Central Asia / Siberia", "Kyrgyz": "Central Asia / Siberia",
-    "Tuvinian": "Central Asia / Siberia", "Eskimo": "Central Asia / Siberia",
-    # Oceania
-    "Papuan": "Oceania", "Australian": "Oceania", "Bougainville": "Oceania",
-    # Native Americas
-    "Maya": "Native Americas", "Quechua": "Native Americas", "Aymara": "Native Americas",
-    "Mixtec": "Native Americas", "Zapotec": "Native Americas", "Piapoco": "Native Americas",
-    "Surui": "Native Americas", "Karitiana": "Native Americas",
-}
-
 
 def download_metadata(cfg: Config) -> None:
-    """Fetch SGDP sample metadata from the ENA portal API."""
+    """Fetch SGDP sample metadata from the IGSR portal API."""
     out = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
     if out.exists():
         log(f"  skip (exists): {out.name}")
         return
     ensure_dirs(cfg.sgdp_raw_dir())
 
-    log("Fetching SGDP sample metadata from ENA…")
+    log("Fetching SGDP sample metadata from IGSR portal…")
     try:
-        tsv = _fetch_url(_ENA_SAMPLE_API)
+        body = json.dumps(_IGSR_PAYLOAD).encode()
+        req = urllib.request.Request(
+            _IGSR_SAMPLE_API,
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            tsv = resp.read().decode("utf-8")
     except Exception as exc:
-        log(f"  ENA API failed: {exc}")
+        log(f"  IGSR API failed: {exc}")
         log("  Writing empty metadata file — SGDP rows will be absent from phenotype table.")
         out.write_text("ena_accession\tsample_alias\tpopulation\tregion\tsex\n")
         return
 
-    df = _parse_sample_response(tsv, cfg.sgdp_populations)
+    df = _parse_igsr_response(tsv, cfg.sgdp_populations)
     df.to_csv(out, sep="\t", index=False)
     log(f"  wrote {out} ({len(df)} samples)")
 
@@ -136,7 +113,7 @@ def download_vcfs(cfg: Config) -> None:
         return
 
     log(f"  Found {len(url_map)} VCF file(s) to download.")
-    tasks = [(url, vcf_dir / filename, cfg.tools.wget) for filename, url in url_map.items()]
+    tasks = [(url, vcf_dir / filename, cfg.tools.wget) for filename, (_, url) in url_map.items()]
     parallel_download(tasks, cfg.download_workers)
 
     for filename in url_map:
@@ -144,6 +121,7 @@ def download_vcfs(cfg: Config) -> None:
         if dest.exists():
             run([cfg.tools.bcftools, "index", "--tbi", str(dest)])
 
+    _link_vcfs_to_metadata(cfg, url_map)
     log("SGDP VCF download complete.")
 
 
@@ -154,15 +132,15 @@ def _fetch_url(url: str) -> str:
         return resp.read().decode("utf-8")
 
 
-def _fetch_vcf_urls(allowed_accessions: set[str] | None) -> dict[str, str]:
-    """Return {filename: https_url} for all VCF analysis files in PRJEB9586."""
+def _fetch_vcf_urls(allowed_accessions: set[str] | None) -> dict[str, tuple[str, str]]:
+    """Return {filename: (sample_accession, https_url)} for all VCF analysis files in PRJEB9586."""
     tsv = _fetch_url(_ENA_ANALYSIS_API)
     lines = [l for l in tsv.splitlines() if l.strip()]
     if len(lines) < 2:
         return {}
 
     header = lines[0].split("\t")
-    result: dict[str, str] = {}
+    result: dict[str, tuple[str, str]] = {}
     for line in lines[1:]:
         parts = dict(zip(header, line.split("\t")))
         sample_acc = parts.get("sample_accession", "").strip()
@@ -176,46 +154,74 @@ def _fetch_vcf_urls(allowed_accessions: set[str] | None) -> dict[str, str]:
             if not raw_url.endswith(".vcf.gz"):
                 continue
             filename = raw_url.rsplit("/", 1)[-1]
-            # Prefer HTTPS over FTP for wget compatibility
             https_url = raw_url.replace("ftp://ftp.sra.ebi.ac.uk", "https://ftp.sra.ebi.ac.uk")
-            result[filename] = https_url
+            result[filename] = (sample_acc, https_url)
 
     return result
 
 
-def _parse_sample_response(tsv: str, filter_populations: list[str]) -> pd.DataFrame:
+def _link_vcfs_to_metadata(cfg: Config, url_map: dict[str, tuple[str, str]]) -> None:
+    """Write vcf_filename column into sgdp_samples.tsv, joining on ena_accession == sample_accession."""
+    samples_tsv = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
+    if not samples_tsv.exists():
+        return
+
+    # {sample_accession: filename}  — last file wins if multiple per sample
+    acc_to_file: dict[str, str] = {sample_acc: fn for fn, (sample_acc, _) in url_map.items()}
+
+    meta = pd.read_csv(samples_tsv, sep="\t")
+    meta["vcf_filename"] = meta["ena_accession"].map(acc_to_file)
+    meta.to_csv(samples_tsv, sep="\t", index=False)
+
+    linked = meta["vcf_filename"].notna().sum()
+    log(f"  Linked {linked}/{len(meta)} metadata rows to VCF files.")
+
+
+def _parse_igsr_response(tsv: str, filter_populations: list[str]) -> pd.DataFrame:
+    empty = pd.DataFrame(columns=["ena_accession", "sample_alias", "population", "region", "sex"])
     lines = [l for l in tsv.splitlines() if l.strip()]
-    if not lines:
-        return pd.DataFrame(columns=["ena_accession", "sample_alias", "population", "region", "sex"])
+    if len(lines) < 2:
+        return empty
 
     header = lines[0].split("\t")
-    rows = [dict(zip(header, l.split("\t"))) for l in lines[1:]]
-    df = pd.DataFrame(rows)
+    rows = []
+    for line in lines[1:]:
+        parts = dict(zip(header, line.split("\t")))
+        if "Simons Genome Diversity Project" not in parts.get("Data collections", ""):
+            continue
 
-    df = df.rename(columns={
-        "sample_accession": "ena_accession",
-        "sample_title": "population_raw",
-    })
+        elastic_ids = parts.get("Population elastic ID", "").split(",")
+        pop_names = parts.get("Population name", "").split(",")
+        superpop_names = parts.get("Superpopulation name", "").split(",")
 
-    # Population: SGDP aliases are formatted as "<Population>_<ID>" (e.g. "French_B_French-1")
-    if "sample_alias" in df.columns:
-        df["population"] = df["sample_alias"].str.extract(r"^([A-Za-z_]+)", expand=False)
-    elif "population_raw" in df.columns:
-        df["population"] = df["population_raw"]
-    else:
-        df["population"] = "Unknown"
+        # Pick the SGDP-specific entry (elastic ID ends with "SGDP")
+        sgdp_idx = next(
+            (i for i, eid in enumerate(elastic_ids) if eid.strip().endswith("SGDP")),
+            None,
+        )
+        population = (
+            pop_names[sgdp_idx].strip()
+            if sgdp_idx is not None and sgdp_idx < len(pop_names)
+            else (pop_names[0].strip() if pop_names else "Unknown")
+        )
+        region = (
+            superpop_names[sgdp_idx].strip().replace(" (SGDP)", "")
+            if sgdp_idx is not None and sgdp_idx < len(superpop_names)
+            else (superpop_names[0].strip() if superpop_names else "Unknown")
+        )
 
-    df["region"] = df["population"].apply(_infer_region)
-    df["sex"] = 0  # ENA search does not expose sex as a standard field
+        rows.append({
+            "ena_accession": parts.get("Biosample ID", "").strip(),
+            "sample_alias": parts.get("Sample name", "").strip(),
+            "population": population,
+            "region": region,
+            "sex": {"M": 1, "F": 2}.get(parts.get("Sex", "").strip(), 0),
+        })
 
+    if not rows:
+        return empty
+
+    df = pd.DataFrame(rows).drop_duplicates("ena_accession")
     if filter_populations:
         df = df[df["population"].isin(filter_populations)]
-
-    return df[["ena_accession", "sample_alias", "population", "region", "sex"]].drop_duplicates("ena_accession")
-
-
-def _infer_region(population: str) -> str:
-    for fragment, region in _REGION_MAP.items():
-        if fragment.lower() in population.lower():
-            return region
-    return "Unknown"
+    return df

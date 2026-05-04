@@ -1,6 +1,6 @@
-# Public Data Sources: 1000 Genomes Project & Simons Genome Diversity Project
+# Public Data Sources: 1000 Genomes Project, Simons Genome Diversity Project & GEUVADIS
 
-This document details the available data in the two public datasets used by TBOOO to simulate UK Biobank structure: the **1000 Genomes Project (1KGP)** and the **Simons Genome Diversity Project (SGDP)**.
+This document details the available data in the three public datasets used by TBOOO: the **1000 Genomes Project (1KGP)**, the **Simons Genome Diversity Project (SGDP)**, and the **GEUVADIS RNA-seq project**.
 
 ---
 
@@ -418,29 +418,108 @@ Requests processed fastest through the Globus mechanism.
 
 ---
 
-## 3. Comparative Summary
+## 3. GEUVADIS RNA-seq
 
-| Feature | 1KGP Phase 3 | 1KGP NYGC 30x | SGDP |
-|---------|-------------|---------------|------|
-| **Total samples** | 2,504 | 3,202 | 300 |
-| **Unrelated samples** | 2,504 | 2,504 | 279 (public) |
-| **Family structure** | Limited trios | 602 complete trios | Not primary focus |
-| **Populations** | 26 | 26 | 142 |
-| **Geographic scope** | 5 continental groups | 5 continental groups | 6 continents; maximally diverse |
-| **Sequencing depth** | Low (~7x, mixed) | 30x uniform | 30x uniform |
-| **SNVs** | 81.4 million | 96.95 million | Adds diversity; imputed vs. 1KGP |
-| **Short indels** | 3.6 million | 13.1 million | Included in variant data |
-| **Structural variants** | ~60,000 (5 types) | Comprehensive ML set | Limited; STRs via dbVar nstd128 |
-| **Primary reference** | GRCh37 | GRCh38 | hs37d5 (GRCh37 + decoy) |
-| **Secondary reference** | GRCh38 (liftover) | — | GRCh38DH |
-| **Phase 3 VCF pattern** | `ALL.chr*.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz` | `CCDG_14151_B01_GRM_WGS_2020-08-05_chr*.filtered.shapeit2-duohmm-phased.vcf.gz` | Per-chromosome VCFs via IGSR |
-| **Individual alignments** | CRAM/BAM per sample | CRAM/BAM per sample | CRAM per sample (~14 TB) |
-| **Imputation panel** | Yes (SHAPEIT4 HAP/LEGEND + VCF) | Yes | Glimpse-imputed vs. 1KGP Phase 3 |
-| **Cloud: AWS S3** | Yes (`s3://1000genomes`, free) | Yes | No |
-| **Cloud: CGC** | Partial | Partial | Yes (279 public, free) |
-| **FTP** | EBI FTP (primary) | EBI FTP | ENA, Harvard Reich Lab |
-| **Globus** | Yes | Yes | Yes (2024+, primary) |
-| **Access restrictions** | Open (all public) | Open (all public) | 279 open; 21 restricted (signed agreement) |
-| **mtDNA data** | Yes (chrMT VCF) | Yes | Yes (45 GB BAMs, 5,344× coverage) |
-| **Y-chromosome data** | Yes (chrY VCF) | Yes | Yes (129 GB BAM tarball) |
-| **UKB simulation role** | Primary genotype + population backbone | Higher-accuracy alternative | Expands population diversity beyond 1KGP |
+### 3.1 Overview
+
+GEUVADIS (Genetic European Variation in Disease) is a collaborative RNA-seq study of lymphoblastoid cell lines (LCLs) derived from 1KGP individuals. Because every GEUVADIS sample is also a 1KGP sample, expression measurements can be directly linked to the matching WGS genotype data — making GEUVADIS the only publicly available dataset that pairs high-coverage WGS with bulk RNA-seq at population scale.
+
+| Attribute | Value |
+|-----------|-------|
+| Publication | Lappalainen et al., *Nature* 2013 |
+| Total samples | 462 |
+| Tissue | LCL (EBV-transformed lymphoblastoid cell lines) |
+| Sequencing | Illumina HiSeq 2000, strand-specific, ~20M 75 bp reads per sample |
+| Reference genome | GRCh37 |
+| Gene models | GENCODE v12 |
+| All samples are | 1KGP individuals (direct overlap with Phase 3 genotype data) |
+
+### 3.2 Population Distribution
+
+| Population | Code | Superpop | Sample count |
+|-----------|------|----------|-------------|
+| Utah Residents (CEPH) with Northern/Western European Ancestry | CEU | EUR | 91 |
+| Finnish in Finland | FIN | EUR | 95 |
+| British in England and Scotland | GBR | EUR | 89 |
+| Toscani in Italia | TSI | EUR | 98 |
+| Yoruba in Ibadan, Nigeria | YRI | AFR | 89 |
+| **Total** | | | **462** |
+
+All 462 samples overlap with the 1KGP Phase 3 2,504-sample unrelated set. No non-Phase-3 individuals are included.
+
+### 3.3 Data Types and Processed Files
+
+#### Raw data (ENA)
+
+| File type | Contents |
+|-----------|----------|
+| FASTQ | Paired-end raw reads, ~75 bp, strand-specific |
+| BAM | Alignments to GRCh37 + GENCODE v12 |
+
+#### Processed quantification (GEUVADIS FTP / ArrayExpress)
+
+| File | Contents |
+|------|----------|
+| `GD462.GeneQuantRPKM.50FN.samplename.recast.txt.gz` | 462 samples × 23,722 genes, RPKM normalized gene-level expression |
+| `GD462.GeneQuantCount.50FN.samplename.recast.txt.gz` | Same matrix, raw read counts |
+| `GD660.GeneQuantRPKM.50FN.samplename.recast.txt.gz` | Expanded 660-sample release (includes technical replicates) |
+| `EUR373.gene.cis.FDR5.all.rs137.txt.gz` | cis-eQTL results, European samples, FDR < 5% |
+| `YRI89.gene.cis.FDR5.all.rs137.txt.gz` | cis-eQTL results, YRI samples, FDR < 5% |
+
+TBOOO uses the **GD462** RPKM matrix as the source for expression PCA. The 660-sample release contains technical replicates and is not used.
+
+### 3.4 Access Methods
+
+**ArrayExpress (primary processed data):**
+```
+https://www.ebi.ac.uk/arrayexpress/experiments/E-GEUV-1/   # EUR populations
+https://www.ebi.ac.uk/arrayexpress/experiments/E-GEUV-3/   # YRI replication set
+```
+
+**ENA (raw reads + alignments):**
+```
+Study accession: PRJEB3366
+https://www.ebi.ac.uk/ena/browser/view/PRJEB3366
+```
+
+**GEUVADIS FTP (processed matrices, eQTL results):**
+```
+https://www.ebi.ac.uk/Tools/geuvadis-das/
+ftp://ftp.ebi.ac.uk/pub/databases/microarray/data/experiment/GEUV/E-GEUV-1/
+```
+
+All data is fully open; no access agreement is required.
+
+### 3.5 Sample Overlap with 1KGP
+
+All 462 GEUVADIS sample IDs (e.g. `NA12878`, `HG00096`) match 1KGP sample IDs in the Phase 3 panel file. The `eid_map_1kg.tsv` generated by `tbooo map eids` is the join key: GEUVADIS sample ID → EID.
+
+The remaining ~2,042 Phase 3 samples (non-CEU/FIN/GBR/TSI/YRI populations) and all SGDP samples have no GEUVADIS data and receive null values for expression PCA columns.
+
+---
+
+## 4. Comparative Summary
+
+| Feature | 1KGP Phase 3 | 1KGP NYGC 30x | SGDP | GEUVADIS |
+|---------|-------------|---------------|------|----------|
+| **Total samples** | 2,504 | 3,202 | 300 | 462 |
+| **Unrelated samples** | 2,504 | 2,504 | 279 (public) | 462 (all are Phase 3 unrelated) |
+| **Family structure** | Limited trios | 602 complete trios | Not primary focus | None |
+| **Populations** | 26 | 26 | 142 | 5 (CEU, FIN, GBR, TSI, YRI) |
+| **Geographic scope** | 5 continental groups | 5 continental groups | 6 continents; maximally diverse | EUR + YRI only |
+| **Data type** | WGS genotypes | WGS genotypes + alignments | WGS genotypes + alignments | RNA-seq (LCL) |
+| **Sequencing depth** | Low (~7x, mixed) | 30x uniform | 30x uniform | ~20M reads/sample |
+| **SNVs** | 81.4 million | 96.95 million | Adds diversity; imputed vs. 1KGP | — |
+| **Short indels** | 3.6 million | 13.1 million | Included in variant data | — |
+| **Structural variants** | ~60,000 (5 types) | Comprehensive ML set | Limited; STRs via dbVar nstd128 | — |
+| **Primary reference** | GRCh37 | GRCh38 | hs37d5 (GRCh37 + decoy) | GRCh37 |
+| **Secondary reference** | GRCh38 (liftover) | — | GRCh38DH | — |
+| **Individual alignments** | CRAM/BAM per sample | CRAM/BAM per sample | CRAM per sample (~14 TB) | BAM per sample (ENA) |
+| **Processed matrices** | — | — | — | RPKM gene expression (GD462) |
+| **Cloud: AWS S3** | Yes (`s3://1000genomes`, free) | Yes | No | No |
+| **Cloud: CGC** | Partial | Partial | Yes (279 public, free) | No |
+| **FTP** | EBI FTP (primary) | EBI FTP | ENA, Harvard Reich Lab | EBI ArrayExpress FTP |
+| **Globus** | Yes | Yes | Yes (2024+, primary) | No |
+| **Access restrictions** | Open (all public) | Open (all public) | 279 open; 21 restricted (signed agreement) | Open (all public) |
+| **mtDNA / Y data** | Yes | Yes | Yes | — |
+| **TBOOO role** | Primary genotype + population backbone | WGS/WES layer | Population diversity beyond 1KGP | Expression PCA → phenotype-like signal |
