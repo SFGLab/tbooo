@@ -15,7 +15,7 @@ Usage:
     tbooo map phenotypes      Build synthetic phenotype Parquet table
     tbooo map qc              Build sample QC and relatedness files
 
-    tbooo run                 Run the full pipeline via Snakemake
+    tbooo run                 Run the full pipeline
 """
 
 from __future__ import annotations
@@ -193,16 +193,22 @@ def map_qc(config):
 
 @cli.command("run")
 @CONFIG_OPTION
-@click.option("-j", "--jobs", default=4, show_default=True, help="Snakemake parallel jobs")
-@click.option("--dry-run", "-n", is_flag=True, help="Dry-run: print rules without executing")
-@click.option("--target", default=None, help="Specific Snakemake target rule or file")
-def run_pipeline(config, jobs, dry_run, target):
-    """Run the full pipeline via Snakemake."""
-    import subprocess, sys
-    cmd = ["snakemake", "--configfile", config, "--cores", str(jobs)]
-    if dry_run:
-        cmd.append("--dry-run")
-    if target:
-        cmd.append(target)
-    result = subprocess.run(cmd)
-    sys.exit(result.returncode)
+@click.option("-j", "--jobs", default=4, show_default=True,
+              help="Parallel jobs for per-chromosome pipeline steps")
+@click.option("-n", "--dry-run", is_flag=True,
+              help="Print steps without executing")
+@click.option("--chroms", default=None,
+              help="Comma-separated chromosomes to process (default: all)")
+@click.option("--target", default=None,
+              type=click.Choice(["array", "imputed", "wes", "wgs",
+                                 "geuvadis", "phenotypes", "qc"]),
+              help="Run only this stage (assumes prerequisites already exist)")
+@click.option("--no-download", is_flag=True,
+              help="Skip all download steps")
+def run_pipeline(config, jobs, dry_run, chroms, target, no_download):
+    """Run the full pipeline (or a single stage)."""
+    from tbooo.pipeline.runner import run
+    cfg = _cfg(config)
+    chrom_list = chroms.split(",") if chroms else None
+    run(cfg, jobs=jobs, dry_run=dry_run, chroms=chrom_list,
+        target=target, skip_download=no_download)
