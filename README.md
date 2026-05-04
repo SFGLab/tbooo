@@ -67,17 +67,62 @@ Requires Python ≥ 3.10. Installs: `click`, `pyyaml`, `pandas`, `pyarrow`, `tqd
 
 ### External bioinformatics tools
 
-| Tool | Purpose | Install |
-|------|---------|---------|
-| `bcftools` ≥ 1.17 | VCF filtering, normalization, reheadering | `conda install -c bioconda bcftools` |
-| `plink2` ≥ 2.00a3 | VCF → PLINK, het stats | https://www.cog-genomics.org/plink/2.0/ |
-| `qctool` ≥ 2.0.8 | VCF → BGEN v1.2 | https://www.well.ox.ac.uk/~gav/qctool_v2/ |
-| `bgenix` ≥ 1.1.7 | BGEN indexing | https://enkre.net/cgi-bin/code/bgen/ |
-| `samtools` ≥ 1.17 | FASTA indexing | `conda install -c bioconda samtools` |
-| `king` ≥ 2.3 | Kinship estimation | https://www.kingrelatedness.com/ |
-| `wget` | Downloads | system package manager |
+| Tool | Min version | Purpose |
+|------|-------------|---------|
+| `bcftools` | 1.17 | VCF filtering, normalization, reheadering, tabix indexing |
+| `samtools` | 1.17 | FASTA indexing, CRAM operations |
+| `plink2` | 2.00a3 | VCF → PLINK BED/BIM/FAM, heterozygosity stats, PLINK merge |
+| `qctool` | 2.0.8 | VCF → BGEN v1.2 conversion |
+| `bgenix` | 1.1.7 | BGEN index generation (.bgi files) |
+| `king` | 2.3 | Pairwise kinship estimation |
+| `wget` | any | File downloads (resumable) |
+| `tar`, `gzip` | any | Archive extraction — pre-installed on both platforms |
 
 All tool paths can be overridden in `config.yaml` under the `tools:` key.
+
+#### Ubuntu
+
+```bash
+# ── 1. System basics ──────────────────────────────────────────────────────────
+sudo apt-get update
+sudo apt-get install -y wget curl unzip tar gzip build-essential zlib1g-dev
+
+# ── 2. bcftools + samtools ────────────────────────────────────────────────────
+# Ubuntu 24.04 ships bcftools 1.18 / samtools 1.19 — meets requirements:
+sudo apt-get install -y bcftools samtools
+# Ubuntu 22.04 ships 1.13 (too old). Use conda instead:
+#   conda install -c bioconda bcftools samtools
+
+# ── 3. plink2 ─────────────────────────────────────────────────────────────────
+# Download the latest AVX2 build from https://www.cog-genomics.org/plink/2.0/
+# Replace the filename with the current release date shown on that page.
+wget https://s3.amazonaws.com/plink2-assets/alpha7/plink2_linux_avx2_20260504.zip
+unzip plink2_linux_avx2_20260504
+sudo install plink2 /usr/local/bin/
+
+# ── 4. qctool v2 ─────────────────────────────────────────────────────────────
+# Prebuilt CentOS/Linux binary from https://www.well.ox.ac.uk/~gav/qctool_v2/
+# (CentOS binaries run on Ubuntu via glibc compatibility)
+wget "https://www.well.ox.ac.uk/~gav/resources/qctool_v2.2.0-CentOS_Linux7.8.2003-x86_64.tgz"
+tar -xzf qctool_v2.2.0-CentOS_Linux7.8.2003-x86_64.tgz
+sudo install qctool_v2.2.0-CentOS\ Linux7.8.2003-x86_64/qctool /usr/local/bin/
+
+# ── 5. bgenix ─────────────────────────────────────────────────────────────────
+# Part of the BGEN reference implementation — build from source.
+# Project page: https://enkre.net/cgi-bin/code/bgen
+sudo apt-get install -y libbz2-dev libboost-iostreams-dev libboost-filesystem-dev python3
+git clone https://enkre.net/cgi-bin/code/bgen bgen-src
+cd bgen-src && python3 waf configure && python3 waf
+sudo install build/bgenix /usr/local/bin/
+cd ..
+
+# ── 6. KING ───────────────────────────────────────────────────────────────────
+# Prebuilt Linux binary from https://www.kingrelatedness.com/
+# Replace URL with the latest version shown on the downloads page.
+wget https://www.kingrelatedness.com/executables/Linux-king231.tar.gz
+tar -xzf Linux-king231.tar.gz
+sudo install king /usr/local/bin/
+```
 
 ---
 
