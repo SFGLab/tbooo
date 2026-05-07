@@ -139,7 +139,7 @@ def _download_grch37(cfg: Config) -> None:
     # RAZF format: gzip data followed by an index trailer that gunzip doesn't
     # understand. gunzip exits 2 ("trailing garbage ignored") but the output is
     # valid, so we allow exit codes 0 and 2 and verify the file afterwards.
-    log("  decompressing RAZF FASTA (trailing garbage warning from gunzip is expected)…")
+    log("  decompressing RAZF FASTA…")
     result = run(["gunzip", "--force", "--keep", str(fasta_gz)], check=False)
     if result.returncode not in (0, 2):
         raise RuntimeError(

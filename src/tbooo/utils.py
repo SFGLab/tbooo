@@ -47,8 +47,15 @@ def bgzip_tabix(vcf_gz: Path, *, tool_bcftools: str = "bcftools") -> None:
 
 def wget_download(url: str, dest: Path, *, tool_wget: str = "wget", resume: bool = True) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [tool_wget, "--continue" if resume else "--no-continue",
-           "--quiet", "--show-progress", "-O", str(dest), url]
+    cmd = [
+        tool_wget,
+        "--continue" if resume else "--no-continue",
+        "--quiet", "--show-progress",
+        "--read-timeout=60",   # treat 60s of silence as a stall
+        "--tries=10",          # retry up to 10 times on stall or transient error
+        "--waitretry=5",       # wait 5s before each retry (doubles up to 30s)
+        "-O", str(dest), url,
+    ]
     run(cmd)
 
 
