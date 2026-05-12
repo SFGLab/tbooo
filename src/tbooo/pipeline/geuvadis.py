@@ -28,7 +28,7 @@ from tbooo.utils import ensure_dirs, log
 
 N_PCS = 10
 _MIN_MEDIAN_RPKM = 0.1
-_RPKM_FILENAME = "GD462.GeneQuantRPKM.50FN.samplename.recast.txt.gz"
+_RPKM_FILENAME = "GD462.GeneQuantRPKM.50FN.samplename.resk10.txt.gz"
 # 1KGP sample IDs: 2 uppercase letters + 5 digits (HG00096, NA12878, …)
 _SAMPLE_ID_LEN = 7
 
@@ -57,7 +57,8 @@ def build_expression_pcs(cfg: Config) -> None:
     rpkm = rpkm.loc[rpkm.median(axis=1) >= _MIN_MEDIAN_RPKM]
     log(f"  {len(rpkm)} genes after median RPKM ≥ {_MIN_MEDIAN_RPKM} filter")
 
-    X = np.log2(rpkm.values.T.astype(float) + 0.1)   # (n_samples, n_genes)
+    vals = np.clip(np.nan_to_num(rpkm.values.T.astype(float), nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
+    X = np.log2(vals + 0.1)  # (n_samples, n_genes)
     sample_ids = list(rpkm.columns)
 
     log(f"Running PCA (n_components={N_PCS})…")

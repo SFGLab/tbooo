@@ -73,7 +73,7 @@ def _read_phase3_panel(path: Path) -> pd.DataFrame:
 
 
 def _read_nygc_panel(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path, sep="\t")
+    df = pd.read_csv(path, sep=r"\s+", engine="python")
 
     # 20130606_g1k_3202_samples_ped_population.txt is PED+pop format:
     # FamilyID  SampleID  FatherID  MotherID  Sex  Phenotype  Population  Superpopulation

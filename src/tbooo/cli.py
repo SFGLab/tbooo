@@ -14,6 +14,7 @@ Usage:
     tbooo map geuvadis        Compute expression PCA and add geuvadis_pc* to participant.parquet
     tbooo map phenotypes      Build synthetic phenotype Parquet table
     tbooo map qc              Build sample QC and relatedness files
+    tbooo map eda             EDA plots: sex/region demographics + RNA PCA
 
     tbooo run                 Run the full pipeline
 """
@@ -189,6 +190,14 @@ def map_qc(config):
     build_qc_files(_cfg(config))
 
 
+@map.command("eda")
+@CONFIG_OPTION
+def map_eda(config):
+    """EDA plots: sex/region demographics + GEUVADIS RNA PCA."""
+    from tbooo.pipeline.eda import run_eda
+    run_eda(_cfg(config))
+
+
 # ── run ───────────────────────────────────────────────────────────────────────
 
 @cli.command("run")
@@ -201,7 +210,7 @@ def map_qc(config):
               help="Comma-separated chromosomes to process (default: all)")
 @click.option("--target", default=None,
               type=click.Choice(["array", "imputed", "wes", "wgs",
-                                 "geuvadis", "phenotypes", "qc"]),
+                                 "geuvadis", "phenotypes", "qc", "eda"]),
               help="Run only this stage (assumes prerequisites already exist)")
 @click.option("--no-download", is_flag=True,
               help="Skip all download steps")
