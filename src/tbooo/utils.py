@@ -52,7 +52,7 @@ def wget_download(url: str, dest: Path, *, tool_wget: str = "wget", resume: bool
         "--continue" if resume else "--no-continue",
         "--quiet", "--show-progress",
         "--read-timeout=10",   # treat 10s of silence as a stall
-        "--tries=1000",          # retry up to 1000 times on stall or transient error
+        "--tries=100000",          # retry up to 100000 times on stall or transient error
         "--waitretry=5",       # wait 5s before each retry (doubles up to 30s)
         "-O", str(dest), url,
     ]
