@@ -3,8 +3,9 @@
 Steps:
     1. Read GD462 RPKM matrix (genes × samples).
     2. Filter genes: median RPKM >= MIN_MEDIAN_RPKM across all samples.
-    3. Log2-transform: log2(RPKM + 0.1).
-    4. PCA(n_components=N_PCS) on the (samples × genes) matrix.
+    3. Log2-transform: log2(max(RPKM, 0) + 0.1).
+    4. Select top N_HVG genes by post-log2 variance.
+    5. PCA(n_components=N_PCS) on the (samples × genes) matrix.
     5. Join scores to eid_map_1kg on sample_id.
     6. Write geuvadis_expression_pcs.tsv and geuvadis_pca_variance.tsv.
     7. Merge PC columns into participant.parquet (samples not in GEUVADIS get null).
@@ -26,7 +27,8 @@ from sklearn.decomposition import PCA
 from tbooo.config import Config
 from tbooo.utils import ensure_dirs, log
 
-N_PCS = 10
+N_PCS = 20
+N_HVG = 2000        # top highly-variable genes selected after log2 transform
 _MIN_MEDIAN_RPKM = 0.1
 _RPKM_FILENAME = "GD462.GeneQuantRPKM.50FN.samplename.resk10.txt.gz"
 # 1KGP sample IDs: 2 uppercase letters + 5 digits (HG00096, NA12878, …)
@@ -60,6 +62,12 @@ def build_expression_pcs(cfg: Config) -> None:
     vals = np.clip(np.nan_to_num(rpkm.values.T.astype(float), nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
     X = np.log2(vals + 0.1)  # (n_samples, n_genes)
     sample_ids = list(rpkm.columns)
+
+    # Keep top-N most variable genes to concentrate signal before PCA
+    gene_vars = X.var(axis=0)
+    hvg_idx = np.argsort(gene_vars)[-N_HVG:]
+    X = X[:, hvg_idx]
+    log(f"  {X.shape[1]} highly variable genes selected (top {N_HVG} by post-log2 variance)")
 
     log(f"Running PCA (n_components={N_PCS})…")
     pca = PCA(n_components=N_PCS)
