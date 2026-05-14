@@ -55,14 +55,15 @@ def run_eda(cfg: Config) -> None:
     _plot_regions(map1kg, map_sgdp, out_dir, plt)
 
     variance_path = cfg.metadata_dir() / "geuvadis_pca_variance.tsv"
-    if variance_path.exists():
-        _plot_scree(pd.read_csv(variance_path, sep="\t"), out_dir, plt)
+    variance = pd.read_csv(variance_path, sep="\t") if variance_path.exists() else None
+    if variance is not None:
+        _plot_scree(variance, out_dir, plt)
     else:
         log("  skip scree: geuvadis_pca_variance.tsv not found — run `tbooo map geuvadis`")
 
     pc_cols = [c for c in part.columns if c.startswith("geuvadis_pc")]
     if pc_cols and map1kg is not None:
-        _plot_pca_scatter(part, pc_cols, map1kg, out_dir, plt)
+        _plot_pca_scatter(part, pc_cols, map1kg, variance, out_dir, plt)
     else:
         log("  skip PCA scatter: geuvadis_pc* columns or eid_map_1kg.tsv not found")
 
@@ -160,42 +161,64 @@ def _plot_scree(variance: pd.DataFrame, out_dir: Path, plt) -> None:
 
 
 def _plot_pca_scatter(part: pd.DataFrame, pc_cols: list[str],
-                      map1kg: pd.DataFrame, out_dir: Path, plt) -> None:
-    pc1, pc2 = pc_cols[0], pc_cols[1]
+                      map1kg: pd.DataFrame, variance, out_dir: Path, plt) -> None:
+    # Build variance-label lookup: "PC1 (5.2%)"
+    var_pct: dict[str, str] = {}
+    if variance is not None:
+        for _, row in variance.iterrows():
+            label = row["pc"].replace("geuvadis_", "").upper()
+            var_pct[row["pc"]] = f"{label} ({row['variance_explained']*100:.1f}%)"
+
+    def _ax_label(col: str) -> str:
+        return var_pct.get(col, col.replace("geuvadis_", "").upper())
+
+    # Pairs to show: PC1v2, PC1v3, PC2v3
+    n = len(pc_cols)
+    pairs = [(pc_cols[0], pc_cols[1]),
+             (pc_cols[0], pc_cols[min(2, n-1)]),
+             (pc_cols[1], pc_cols[min(2, n-1)])]
+
+    needed = [c for pair in pairs for c in pair]
     df = (
-        part[["eid", "p31", pc1, pc2]]
-        .dropna(subset=[pc1])
+        part[["eid", "p31"] + list(dict.fromkeys(needed))]
+        .dropna(subset=[pc_cols[0]])
         .copy()
     )
     df["sex_label"] = df["p31"].map(_SEX_MAP).fillna("Unknown")
     df = df.merge(map1kg[["eid", "super_pop"]], on="eid", how="left")
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    colorings = [
+        ("super-population", "super_pop",
+         lambda sp: _SUPERPOP_COLORS.get(sp, "#888888"),
+         sorted(df["super_pop"].dropna().unique())),
+        ("sex", "sex_label",
+         lambda s: _SEX_COLORS.get(s, "#929292"),
+         [k for k in ("Male", "Female", "Unknown") if k in df["sex_label"].values]),
+    ]
 
-    ax = axes[0]
-    for sp, grp in df.groupby("super_pop"):
-        ax.scatter(grp[pc1], grp[pc2],
-                   c=_SUPERPOP_COLORS.get(sp, "#888888"), s=18, alpha=0.8, label=sp)
-    ax.set_xlabel("PC1")
-    ax.set_ylabel("PC2")
-    ax.set_title("RNA PCA — super-population", fontsize=11)
-    ax.legend(fontsize=8, markerscale=1.5, frameon=False)
-    _style(ax)
+    fig, axes = plt.subplots(len(colorings), len(pairs),
+                             figsize=(5 * len(pairs), 4.5 * len(colorings)))
 
-    ax = axes[1]
-    for sex_label, grp in df.groupby("sex_label"):
-        ax.scatter(grp[pc1], grp[pc2],
-                   c=_SEX_COLORS.get(sex_label, "#888888"), s=18, alpha=0.8, label=sex_label)
-    ax.set_xlabel("PC1")
-    ax.set_ylabel("PC2")
-    ax.set_title("RNA PCA — sex", fontsize=11)
-    ax.legend(fontsize=8, markerscale=1.5, frameon=False)
-    _style(ax)
+    for row_idx, (title, color_col, color_fn, groups) in enumerate(colorings):
+        for col_idx, (xc, yc) in enumerate(pairs):
+            ax = axes[row_idx][col_idx]
+            for grp_val in groups:
+                mask = df[color_col] == grp_val
+                ax.scatter(df.loc[mask, xc], df.loc[mask, yc],
+                           c=color_fn(grp_val), s=22, alpha=0.75,
+                           linewidths=0, label=grp_val)
+            ax.set_xlabel(_ax_label(xc), fontsize=9)
+            ax.set_ylabel(_ax_label(yc), fontsize=9)
+            if col_idx == 0:
+                ax.set_title(f"RNA PCA — {title}", fontsize=10, pad=6)
+            legend = ax.legend(fontsize=7, markerscale=1.8, frameon=False,
+                               loc="best", ncol=1)
+            _style(ax)
 
-    fig.tight_layout()
-    fig.savefig(out_dir / "rna_pca_pc1_pc2.png", dpi=150)
+    fig.tight_layout(h_pad=3, w_pad=2)
+    fig.savefig(out_dir / "rna_pca_grid.png", dpi=150)
     plt.close(fig)
-    log("  rna_pca_pc1_pc2.png")
+    log("  rna_pca_grid.png")
 
 
 def _write_summary(part: pd.DataFrame, map1kg, map_sgdp, out_dir: Path) -> None:
