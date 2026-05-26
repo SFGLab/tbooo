@@ -116,13 +116,34 @@ def download_vcfs(cfg: Config) -> None:
     tasks = [(url, vcf_dir / filename, cfg.tools.wget) for filename, (_, url) in url_map.items()]
     parallel_download(tasks, cfg.download_workers)
 
-    for filename in url_map:
-        dest = vcf_dir / filename
-        if dest.exists():
-            run([cfg.tools.bcftools, "index", "--tbi", str(dest)])
+    _index_vcfs(cfg, [vcf_dir / fn for fn in url_map])
 
     _link_vcfs_to_metadata(cfg, url_map)
     log("SGDP VCF download complete.")
+
+
+def _index_vcfs(cfg: Config, vcfs: list[Path]) -> None:
+    """Tabix-index each VCF. Skip if index is up-to-date; re-index with -f if stale or missing."""
+    present = [v for v in vcfs if v.exists()]
+    log(f"Indexing {len(present)} SGDP VCF(s)…")
+    indexed = skipped = rebuilt = 0
+    for i, vcf in enumerate(present, 1):
+        tbi = vcf.with_suffix(vcf.suffix + ".tbi")
+        if tbi.exists() and tbi.stat().st_mtime >= vcf.stat().st_mtime:
+            skipped += 1
+            continue
+        force = tbi.exists()
+        cmd = [cfg.tools.bcftools, "index", "--tbi"]
+        if force:
+            cmd.append("-f")
+            rebuilt += 1
+            log(f"  [{i}/{len(present)}] rebuilding stale index: {vcf.name}")
+        else:
+            indexed += 1
+            log(f"  [{i}/{len(present)}] indexing: {vcf.name}")
+        cmd.append(str(vcf))
+        run(cmd)
+    log(f"  Indexing done: {indexed} new, {rebuilt} rebuilt, {skipped} up-to-date.")
 
 
 # ── Internals ─────────────────────────────────────────────────────────────────
