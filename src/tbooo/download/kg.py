@@ -157,6 +157,15 @@ def _repair_truncated_vcfs(
     log(f"  Re-downloaded {len(broken)} {label} VCF(s) successfully.")
 
 
+def _bgzip_test(vcf: Path) -> bool | None:
+    """End-to-end BGZF integrity check. None if `bgzip` is unavailable."""
+    try:
+        proc = run(["bgzip", "-t", str(vcf)], check=False, capture=True)
+    except FileNotFoundError:
+        return None
+    return proc.returncode == 0
+
+
 def _verify_indices(
     cfg: Config,
     vcf_tasks: list[tuple[str, Path, str]],
@@ -164,30 +173,57 @@ def _verify_indices(
     label: str,
 ) -> None:
     """Ensure every VCF has a non-empty .tbi alongside it.
-    Re-download missing/zero-byte indices; rebuild locally if .tbi is older than the VCF."""
+
+    Re-download missing/zero-byte indices from EBI. For any VCF whose .tbi mtime is
+    older than the VCF's (smoke signal that the pair was disturbed), run `bgzip -t`
+    end-to-end integrity check: if the VCF is intact, just re-download the canonical
+    .tbi; if the VCF is corrupt, re-download both.
+    """
     log(f"Checking {len(vcf_tasks)} {label} VCF index file(s)…")
     redownload: list[tuple[str, Path, str]] = []
-    rebuilt = 0
+    corrupt_vcfs = 0
+    refreshed_tbi = 0
     ok = 0
+
     for url, vcf, wget_bin in vcf_tasks:
         if not vcf.exists():
             continue
         tbi = Path(str(vcf) + ".tbi")
+
         if not tbi.exists() or tbi.stat().st_size == 0:
-            log(f"  missing/empty index: {tbi.name}")
+            log(f"  missing/empty index: {tbi.name} — re-downloading from EBI")
             if tbi.exists():
                 tbi.unlink()
             redownload.append((url + ".tbi", tbi, wget_bin))
             continue
+
         if tbi.stat().st_mtime < vcf.stat().st_mtime:
-            log(f"  rebuilding stale index: {tbi.name}")
-            run([cfg.tools.bcftools, "index", "--tbi", "-f", str(vcf)])
-            rebuilt += 1
+            log(f"  .tbi older than VCF — deep-checking {vcf.name}")
+            check = _bgzip_test(vcf)
+            if check is False:
+                log(f"    VCF is corrupt — re-downloading VCF + .tbi")
+                vcf.unlink(missing_ok=True)
+                tbi.unlink(missing_ok=True)
+                redownload.append((url, vcf, wget_bin))
+                redownload.append((url + ".tbi", tbi, wget_bin))
+                corrupt_vcfs += 1
+            else:
+                if check is None:
+                    log("    WARN: bgzip not on PATH — skipping deep check, assuming VCF intact")
+                log(f"    VCF intact — re-downloading canonical .tbi")
+                tbi.unlink()
+                redownload.append((url + ".tbi", tbi, wget_bin))
+                refreshed_tbi += 1
             continue
+
         ok += 1
 
     if redownload:
-        log(f"  Re-downloading {len(redownload)} index file(s)…")
+        log(f"  Re-downloading {len(redownload)} file(s) from EBI…")
         parallel_download(redownload, cfg.download_workers)
 
-    log(f"  Indices: {ok} up-to-date, {rebuilt} rebuilt, {len(redownload)} re-downloaded.")
+    log(
+        f"  Indices: {ok} up-to-date, "
+        f"{refreshed_tbi} .tbi refreshed, "
+        f"{corrupt_vcfs} VCF(s) replaced."
+    )
