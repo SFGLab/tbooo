@@ -85,5 +85,22 @@ def eid_prefix_dir(eid: int) -> str:
     return str(eid)[:2]
 
 
+# Empty BGZF block — every valid bgzip-compressed file ends with these 28 bytes.
+# Absence signals the download was truncated mid-stream.
+_BGZF_EOF = bytes.fromhex("1f8b08040000000000ff0600424302001b0003000000000000000000")
+
+
+def has_bgzf_eof(path: Path) -> bool:
+    """True iff `path` exists and ends with the BGZF EOF marker (intact bgzip stream)."""
+    try:
+        if path.stat().st_size < len(_BGZF_EOF):
+            return False
+        with path.open("rb") as f:
+            f.seek(-len(_BGZF_EOF), 2)
+            return f.read() == _BGZF_EOF
+    except OSError:
+        return False
+
+
 def log(msg: str) -> None:
     print(f"[tbooo] {msg}", flush=True)

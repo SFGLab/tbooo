@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, log, parallel_download, run, wget_download
+from tbooo.utils import ensure_dirs, has_bgzf_eof, log, parallel_download, run, wget_download
 
 # IGSR portal API — returns all samples across all collections
 _IGSR_SAMPLE_API = "https://www.internationalgenome.org/api/beta/sample/_search/igsr_samples.tsv"
@@ -116,10 +116,44 @@ def download_vcfs(cfg: Config) -> None:
     tasks = [(url, vcf_dir / filename, cfg.tools.wget) for filename, (_, url) in url_map.items()]
     parallel_download(tasks, cfg.download_workers)
 
+    _repair_truncated_vcfs(cfg, url_map, vcf_dir)
     _index_vcfs(cfg, [vcf_dir / fn for fn in url_map])
 
     _link_vcfs_to_metadata(cfg, url_map)
     log("SGDP VCF download complete.")
+
+
+def _repair_truncated_vcfs(cfg: Config, url_map: dict, vcf_dir: Path) -> None:
+    """Detect VCFs missing the BGZF EOF marker (interrupted download) and re-fetch them."""
+    log(f"Validating {len(url_map)} SGDP VCF(s) for completeness…")
+    broken: list[tuple[str, Path]] = []
+    for filename, (_, url) in url_map.items():
+        path = vcf_dir / filename
+        if path.exists() and not has_bgzf_eof(path):
+            broken.append((url, path))
+
+    if not broken:
+        log("  All VCFs intact.")
+        return
+
+    log(f"  Found {len(broken)} truncated VCF(s) — removing and re-downloading…")
+    for _, path in broken:
+        log(f"    removing truncated: {path.name}")
+        path.unlink(missing_ok=True)
+        tbi = path.with_suffix(path.suffix + ".tbi")
+        tbi.unlink(missing_ok=True)
+
+    tasks = [(url, path, cfg.tools.wget) for url, path in broken]
+    parallel_download(tasks, cfg.download_workers)
+
+    still_broken = [p.name for _, p in broken if not has_bgzf_eof(p)]
+    if still_broken:
+        sample = ", ".join(still_broken[:5])
+        more = f" (+{len(still_broken) - 5} more)" if len(still_broken) > 5 else ""
+        raise RuntimeError(
+            f"Re-download failed: {len(still_broken)} VCF(s) still truncated: {sample}{more}"
+        )
+    log(f"  Re-downloaded {len(broken)} VCF(s) successfully.")
 
 
 def _index_vcfs(cfg: Config, vcfs: list[Path]) -> None:
