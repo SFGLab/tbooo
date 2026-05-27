@@ -19,7 +19,15 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, has_bgzf_eof, log, parallel_download, run, wget_download
+from tbooo.utils import (
+    ensure_dirs,
+    find_corrupt_bgzf,
+    has_bgzf_eof,
+    log,
+    parallel_download,
+    run,
+    wget_download,
+)
 
 # IGSR portal API — returns all samples across all collections
 _IGSR_SAMPLE_API = "https://www.internationalgenome.org/api/beta/sample/_search/igsr_samples.tsv"
@@ -124,34 +132,59 @@ def download_vcfs(cfg: Config) -> None:
 
 
 def _repair_truncated_vcfs(cfg: Config, url_map: dict, vcf_dir: Path) -> None:
-    """Detect VCFs missing the BGZF EOF marker (interrupted download) and re-fetch them."""
-    log(f"Validating {len(url_map)} SGDP VCF(s) for completeness…")
-    broken: list[tuple[str, Path]] = []
+    """Detect broken VCFs and re-fetch them.
+
+    Two checks:
+    1. BGZF EOF marker (cheap)        — catches downloads cut at the end.
+    2. `bgzip -t` end-to-end          — catches mid-stream corruption that EOF check misses.
+    """
+    # Build {path: url} for files that exist on disk
+    existing: dict[Path, str] = {}
     for filename, (_, url) in url_map.items():
         path = vcf_dir / filename
-        if path.exists() and not has_bgzf_eof(path):
-            broken.append((url, path))
+        if path.exists():
+            existing[path] = url
 
+    log(f"Validating {len(existing)} SGDP VCF(s) — BGZF EOF check…")
+    eof_broken = {p: u for p, u in existing.items() if not has_bgzf_eof(p)}
+    if eof_broken:
+        log(f"  {len(eof_broken)} missing EOF marker (truncated).")
+
+    intact_after_eof = [p for p in existing if p not in eof_broken]
+    log(f"Deep-checking {len(intact_after_eof)} VCF(s) with `bgzip -t` ({cfg.download_workers} workers)…")
+    deep_broken_paths = find_corrupt_bgzf(intact_after_eof, cfg.download_workers)
+    deep_broken = {p: existing[p] for p in deep_broken_paths}
+
+    broken: dict[Path, str] = {**eof_broken, **deep_broken}
     if not broken:
         log("  All VCFs intact.")
         return
 
-    log(f"  Found {len(broken)} truncated VCF(s) — removing and re-downloading…")
-    for _, path in broken:
-        log(f"    removing truncated: {path.name}")
+    log(f"  Total {len(broken)} broken VCF(s) "
+        f"({len(eof_broken)} truncated, {len(deep_broken)} corrupt) — re-downloading…")
+    for path in broken:
+        log(f"    removing: {path.name}")
         path.unlink(missing_ok=True)
         tbi = path.with_suffix(path.suffix + ".tbi")
         tbi.unlink(missing_ok=True)
 
-    tasks = [(url, path, cfg.tools.wget) for url, path in broken]
+    tasks = [(url, path, cfg.tools.wget) for path, url in broken.items()]
     parallel_download(tasks, cfg.download_workers)
 
-    still_broken = [p.name for _, p in broken if not has_bgzf_eof(p)]
+    # Re-validate both EOF and (where possible) deep integrity
+    redownloaded = list(broken)
+    still_broken = [p.name for p in redownloaded if not has_bgzf_eof(p)]
+    deep_still = find_corrupt_bgzf(
+        [p for p in redownloaded if has_bgzf_eof(p)],
+        cfg.download_workers,
+    )
+    still_broken.extend(p.name for p in deep_still)
+
     if still_broken:
         sample = ", ".join(still_broken[:5])
         more = f" (+{len(still_broken) - 5} more)" if len(still_broken) > 5 else ""
         raise RuntimeError(
-            f"Re-download failed: {len(still_broken)} VCF(s) still truncated: {sample}{more}"
+            f"Re-download failed: {len(still_broken)} VCF(s) still broken: {sample}{more}"
         )
     log(f"  Re-downloaded {len(broken)} VCF(s) successfully.")
 

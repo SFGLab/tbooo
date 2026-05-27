@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, has_bgzf_eof, log, parallel_download, run, wget_download
+from tbooo.utils import bgzip_test, ensure_dirs, has_bgzf_eof, log, parallel_download, run, wget_download
 
 # ── Phase 3 ──────────────────────────────────────────────────────────────────
 
@@ -157,15 +157,6 @@ def _repair_truncated_vcfs(
     log(f"  Re-downloaded {len(broken)} {label} VCF(s) successfully.")
 
 
-def _bgzip_test(vcf: Path) -> bool | None:
-    """End-to-end BGZF integrity check. None if `bgzip` is unavailable."""
-    try:
-        proc = run(["bgzip", "-t", str(vcf)], check=False, capture=True)
-    except FileNotFoundError:
-        return None
-    return proc.returncode == 0
-
-
 def _verify_indices(
     cfg: Config,
     vcf_tasks: list[tuple[str, Path, str]],
@@ -199,7 +190,7 @@ def _verify_indices(
 
         if tbi.stat().st_mtime < vcf.stat().st_mtime:
             log(f"  .tbi older than VCF — deep-checking {vcf.name}")
-            check = _bgzip_test(vcf)
+            check = bgzip_test(vcf)
             if check is False:
                 log(f"    VCF is corrupt — re-downloading VCF + .tbi")
                 vcf.unlink(missing_ok=True)

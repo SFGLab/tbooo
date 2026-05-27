@@ -102,5 +102,52 @@ def has_bgzf_eof(path: Path) -> bool:
         return False
 
 
+def bgzip_test(path: Path) -> bool | None:
+    """End-to-end BGZF integrity check via `bgzip -t`.
+
+    Returns True if intact, False if corrupt, None if `bgzip` is not on PATH.
+    Catches mid-stream corruption that `has_bgzf_eof` misses.
+    """
+    try:
+        proc = subprocess.run(
+            ["bgzip", "-t", str(path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    return proc.returncode == 0
+
+
+def find_corrupt_bgzf(paths: list[Path], workers: int) -> list[Path]:
+    """Run `bgzip -t` on every path in parallel; return those that fail (mid-stream corruption).
+
+    Logs progress as `[i/N]`. If `bgzip` is missing, logs a warning once and returns [].
+    """
+    if not paths:
+        return []
+    corrupt: list[Path] = []
+    bgzip_missing = False
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(bgzip_test, p): p for p in paths}
+        for future in as_completed(futures):
+            p = futures[future]
+            result = future.result()
+            done += 1
+            if result is None:
+                bgzip_missing = True
+                continue
+            if not result:
+                corrupt.append(p)
+                log(f"  [{done}/{len(paths)}] CORRUPT: {p.name}")
+            elif done % 25 == 0 or done == len(paths):
+                log(f"  [{done}/{len(paths)}] deep-checked")
+    if bgzip_missing:
+        log("  WARN: bgzip not on PATH — deep integrity check skipped")
+    return corrupt
+
+
 def log(msg: str) -> None:
     print(f"[tbooo] {msg}", flush=True)
