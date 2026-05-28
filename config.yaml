@@ -44,6 +44,11 @@ exome_bed: "data/reference/idt_xgen_exome_v1_GRCh38.bed"
 # Simultaneous wget processes for VCF chromosome downloads (1KGP and SGDP).
 download_workers: 4
 
+# Parallel `bgzip -t` workers for deep BGZF integrity checks
+# (opt-in via `tbooo download {1kg,sgdp} --deep-check`).
+# CPU-bound, so this can be much higher than `download_workers`.
+deep_check_workers: 8
+
 # ─── External tools ───────────────────────────────────────────────────────────
 # Override any entry if the binary is not on PATH.
 tools:

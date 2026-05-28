@@ -58,27 +58,37 @@ def download():
 @click.option("--phase3/--no-phase3", default=True, help="Download Phase 3 VCFs")
 @click.option("--nygc/--no-nygc", default=True, help="Download NYGC 30x VCFs")
 @click.option("--chroms", default=None, help="Comma-separated chromosomes (default: all)")
-def download_1kg(config, phase3, nygc, chroms):
+@click.option("--deep-check", is_flag=True,
+              help="Run `bgzip -t` end-to-end integrity check on stale-index VCFs "
+                   "(catches mid-stream corruption; uses deep_check_workers from config)")
+def download_1kg(config, phase3, nygc, chroms, deep_check):
     """Download 1000 Genomes Phase 3 and/or NYGC 30x VCFs."""
     from tbooo.download.kg import download_phase3, download_nygc
     cfg = _cfg(config)
     chrom_list = chroms.split(",") if chroms else cfg.chromosomes
     if phase3:
-        download_phase3(cfg, chrom_list)
+        download_phase3(cfg, chrom_list, deep_check=deep_check)
     if nygc:
-        download_nygc(cfg, chrom_list)
+        download_nygc(cfg, chrom_list, deep_check=deep_check)
 
 
 @download.command("sgdp")
 @CONFIG_OPTION
 @click.option("--vcf/--no-vcf", "do_vcf", default=True, help="Download per-sample VCF files")
-def download_sgdp(config, do_vcf):
+@click.option("--deep-check", is_flag=True,
+              help="Run `bgzip -t` end-to-end integrity check on every VCF "
+                   "(catches mid-stream corruption; uses deep_check_workers from config)")
+@click.option("--tolerate-broken", is_flag=True,
+              help="If a VCF is still broken after re-download, drop it (and its sample) "
+                   "from the dataset instead of crashing. Affected samples will be absent "
+                   "from downstream outputs.")
+def download_sgdp(config, do_vcf, deep_check, tolerate_broken):
     """Download SGDP sample metadata and VCF files from ENA (no CRAMs)."""
     from tbooo.download.sgdp import download_metadata, download_vcfs
     cfg = _cfg(config)
     download_metadata(cfg)
     if do_vcf:
-        download_vcfs(cfg)
+        download_vcfs(cfg, deep_check=deep_check, tolerate_broken=tolerate_broken)
 
 
 @download.command("geuvadis")

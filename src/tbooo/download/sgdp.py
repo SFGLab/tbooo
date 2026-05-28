@@ -88,7 +88,12 @@ def download_metadata(cfg: Config) -> None:
     log(f"  wrote {out} ({len(df)} samples)")
 
 
-def download_vcfs(cfg: Config) -> None:
+def download_vcfs(
+    cfg: Config,
+    *,
+    deep_check: bool = False,
+    tolerate_broken: bool = False,
+) -> None:
     """Download per-sample phased VCF files from ENA analysis results for PRJEB9586."""
     vcf_dir = cfg.sgdp_vcf_dir()
     ensure_dirs(vcf_dir)
@@ -124,19 +129,30 @@ def download_vcfs(cfg: Config) -> None:
     tasks = [(url, vcf_dir / filename, cfg.tools.wget) for filename, (_, url) in url_map.items()]
     parallel_download(tasks, cfg.download_workers)
 
-    _repair_truncated_vcfs(cfg, url_map, vcf_dir)
+    _repair_truncated_vcfs(
+        cfg, url_map, vcf_dir,
+        deep_check=deep_check,
+        tolerate_broken=tolerate_broken,
+    )
     _index_vcfs(cfg, [vcf_dir / fn for fn in url_map])
 
     _link_vcfs_to_metadata(cfg, url_map)
     log("SGDP VCF download complete.")
 
 
-def _repair_truncated_vcfs(cfg: Config, url_map: dict, vcf_dir: Path) -> None:
+def _repair_truncated_vcfs(
+    cfg: Config,
+    url_map: dict,
+    vcf_dir: Path,
+    *,
+    deep_check: bool = False,
+    tolerate_broken: bool = False,
+) -> None:
     """Detect broken VCFs and re-fetch them.
 
-    Two checks:
-    1. BGZF EOF marker (cheap)        — catches downloads cut at the end.
-    2. `bgzip -t` end-to-end          — catches mid-stream corruption that EOF check misses.
+    Always runs the cheap BGZF EOF check.
+    With `deep_check=True`, additionally runs `bgzip -t` end-to-end on every VCF
+    (parallelized across `cfg.deep_check_workers`) to catch mid-stream corruption.
     """
     # Build {path: url} for files that exist on disk
     existing: dict[Path, str] = {}
@@ -150,10 +166,13 @@ def _repair_truncated_vcfs(cfg: Config, url_map: dict, vcf_dir: Path) -> None:
     if eof_broken:
         log(f"  {len(eof_broken)} missing EOF marker (truncated).")
 
-    intact_after_eof = [p for p in existing if p not in eof_broken]
-    log(f"Deep-checking {len(intact_after_eof)} VCF(s) with `bgzip -t` ({cfg.download_workers} workers)…")
-    deep_broken_paths = find_corrupt_bgzf(intact_after_eof, cfg.download_workers)
-    deep_broken = {p: existing[p] for p in deep_broken_paths}
+    deep_broken: dict[Path, str] = {}
+    if deep_check:
+        intact_after_eof = [p for p in existing if p not in eof_broken]
+        log(f"Deep-checking {len(intact_after_eof)} VCF(s) with `bgzip -t` "
+            f"({cfg.deep_check_workers} workers)…")
+        deep_broken_paths = find_corrupt_bgzf(intact_after_eof, cfg.deep_check_workers)
+        deep_broken = {p: existing[p] for p in deep_broken_paths}
 
     broken: dict[Path, str] = {**eof_broken, **deep_broken}
     if not broken:
@@ -171,22 +190,34 @@ def _repair_truncated_vcfs(cfg: Config, url_map: dict, vcf_dir: Path) -> None:
     tasks = [(url, path, cfg.tools.wget) for path, url in broken.items()]
     parallel_download(tasks, cfg.download_workers)
 
-    # Re-validate both EOF and (where possible) deep integrity
+    # Re-validate
     redownloaded = list(broken)
-    still_broken = [p.name for p in redownloaded if not has_bgzf_eof(p)]
-    deep_still = find_corrupt_bgzf(
-        [p for p in redownloaded if has_bgzf_eof(p)],
-        cfg.download_workers,
-    )
-    still_broken.extend(p.name for p in deep_still)
+    still_broken_paths: list[Path] = [p for p in redownloaded if not has_bgzf_eof(p)]
+    if deep_check:
+        still_broken_paths.extend(find_corrupt_bgzf(
+            [p for p in redownloaded if has_bgzf_eof(p)],
+            cfg.deep_check_workers,
+        ))
 
-    if still_broken:
-        sample = ", ".join(still_broken[:5])
-        more = f" (+{len(still_broken) - 5} more)" if len(still_broken) > 5 else ""
-        raise RuntimeError(
-            f"Re-download failed: {len(still_broken)} VCF(s) still broken: {sample}{more}"
-        )
-    log(f"  Re-downloaded {len(broken)} VCF(s) successfully.")
+    if still_broken_paths:
+        names = [p.name for p in still_broken_paths]
+        sample = ", ".join(names[:5])
+        more = f" (+{len(names) - 5} more)" if len(names) > 5 else ""
+        msg = f"Re-download failed: {len(names)} VCF(s) still broken: {sample}{more}"
+        if not tolerate_broken:
+            raise RuntimeError(msg)
+        log(f"  WARN: {msg}")
+        log(f"  --tolerate-broken active: dropping broken VCF(s); "
+            f"affected samples will be absent from downstream outputs.")
+        for path in still_broken_paths:
+            path.unlink(missing_ok=True)
+            tbi = path.with_suffix(path.suffix + ".tbi")
+            tbi.unlink(missing_ok=True)
+            url_map.pop(path.name, None)
+
+    survivors = len(broken) - len(still_broken_paths)
+    log(f"  Re-downloaded {survivors}/{len(broken)} VCF(s) successfully"
+        + (f"; {len(still_broken_paths)} dropped." if still_broken_paths else "."))
 
 
 def _index_vcfs(cfg: Config, vcfs: list[Path]) -> None:

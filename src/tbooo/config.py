@@ -58,6 +58,9 @@ class Config:
     # parallel downloads
     download_workers: int = 4
 
+    # parallel workers for `bgzip -t` deep integrity checks (opt-in via --deep-check)
+    deep_check_workers: int = 8
+
     @classmethod
     def load(cls, path: Path | str = "config.yaml") -> "Config":
         with open(path) as f:

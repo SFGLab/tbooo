@@ -15,7 +15,7 @@ _PHASE3_VCF = "ALL.chr{chrom}.phase3_shapeit2_mvncall_integrated_{ver}.{date}.ge
 _PHASE3_SV = "ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz"
 
 
-def download_phase3(cfg: Config, chroms: list[str]) -> None:
+def download_phase3(cfg: Config, chroms: list[str], *, deep_check: bool = False) -> None:
     """Download Phase 3 per-chromosome VCFs, sample panel, and pedigree."""
     out = cfg.kg_raw_dir()
     ensure_dirs(out)
@@ -46,7 +46,7 @@ def download_phase3(cfg: Config, chroms: list[str]) -> None:
     parallel_download(vcf_tasks + tbi_tasks, cfg.download_workers)
 
     _repair_truncated_vcfs(cfg, vcf_tasks, label="Phase 3")
-    _verify_indices(cfg, vcf_tasks, label="Phase 3")
+    _verify_indices(cfg, vcf_tasks, label="Phase 3", deep_check=deep_check)
 
     log(f"Phase 3 download complete → {out}")
 
@@ -58,7 +58,7 @@ _NYGC_PANEL = "20130606_g1k_3202_samples_ped_population.txt"
 _NYGC_PANEL_BASE = "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage"
 
 
-def download_nygc(cfg: Config, chroms: list[str]) -> None:
+def download_nygc(cfg: Config, chroms: list[str], *, deep_check: bool = False) -> None:
     """Download NYGC 30x per-chromosome phased VCFs."""
     out = cfg.kg_raw_dir()
     ensure_dirs(out)
@@ -82,7 +82,7 @@ def download_nygc(cfg: Config, chroms: list[str]) -> None:
     parallel_download(vcf_tasks + tbi_tasks, cfg.download_workers)
 
     _repair_truncated_vcfs(cfg, vcf_tasks, label="NYGC 30x")
-    _verify_indices(cfg, vcf_tasks, label="NYGC 30x")
+    _verify_indices(cfg, vcf_tasks, label="NYGC 30x", deep_check=deep_check)
 
     log(f"NYGC 30x download complete → {out}")
 
@@ -162,15 +162,19 @@ def _verify_indices(
     vcf_tasks: list[tuple[str, Path, str]],
     *,
     label: str,
+    deep_check: bool = False,
 ) -> None:
     """Ensure every VCF has a non-empty .tbi alongside it.
 
     Re-download missing/zero-byte indices from EBI. For any VCF whose .tbi mtime is
-    older than the VCF's (smoke signal that the pair was disturbed), run `bgzip -t`
-    end-to-end integrity check: if the VCF is intact, just re-download the canonical
-    .tbi; if the VCF is corrupt, re-download both.
+    older than the VCF's (smoke signal that the pair was disturbed), refresh the
+    canonical .tbi from EBI.
+
+    With `deep_check=True`, additionally run `bgzip -t` end-to-end integrity check
+    on every VCF whose .tbi is stale; if the VCF is corrupt, re-download both.
     """
-    log(f"Checking {len(vcf_tasks)} {label} VCF index file(s)…")
+    log(f"Checking {len(vcf_tasks)} {label} VCF index file(s)…"
+        + (" (deep check enabled)" if deep_check else ""))
     redownload: list[tuple[str, Path, str]] = []
     corrupt_vcfs = 0
     refreshed_tbi = 0
@@ -189,22 +193,23 @@ def _verify_indices(
             continue
 
         if tbi.stat().st_mtime < vcf.stat().st_mtime:
-            log(f"  .tbi older than VCF — deep-checking {vcf.name}")
-            check = bgzip_test(vcf)
-            if check is False:
-                log(f"    VCF is corrupt — re-downloading VCF + .tbi")
-                vcf.unlink(missing_ok=True)
-                tbi.unlink(missing_ok=True)
-                redownload.append((url, vcf, wget_bin))
-                redownload.append((url + ".tbi", tbi, wget_bin))
-                corrupt_vcfs += 1
-            else:
+            if deep_check:
+                log(f"  .tbi older than VCF — deep-checking {vcf.name}")
+                check = bgzip_test(vcf)
+                if check is False:
+                    log(f"    VCF is corrupt — re-downloading VCF + .tbi")
+                    vcf.unlink(missing_ok=True)
+                    tbi.unlink(missing_ok=True)
+                    redownload.append((url, vcf, wget_bin))
+                    redownload.append((url + ".tbi", tbi, wget_bin))
+                    corrupt_vcfs += 1
+                    continue
                 if check is None:
                     log("    WARN: bgzip not on PATH — skipping deep check, assuming VCF intact")
-                log(f"    VCF intact — re-downloading canonical .tbi")
-                tbi.unlink()
-                redownload.append((url + ".tbi", tbi, wget_bin))
-                refreshed_tbi += 1
+            log(f"  refreshing canonical .tbi: {tbi.name}")
+            tbi.unlink()
+            redownload.append((url + ".tbi", tbi, wget_bin))
+            refreshed_tbi += 1
             continue
 
         ok += 1
