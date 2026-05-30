@@ -88,13 +88,17 @@ def _filter_to_array_sites(cfg: Config, chrom: str, vcf: Path, out: Path) -> Non
             str(vcf),
         ])
     else:
-        # Proxy: biallelic SNPs with rsID and MAF >= threshold
+        # Proxy: biallelic SNPs with rsID and MAF >= threshold.
+        # `--min-af X:minor` filters on the minor allele frequency directly;
+        # using an `--include 'MAF[0]>=...'` expression yields 0 matches against
+        # Phase 3 INFO (only AF/AC/AN are present, MAF isn't a tag).
         log(f"  no manifest — proxy filter: biallelic SNPs, MAF>={maf}, rsID (chr{chrom})…")
         run([
             bcftools, "view",
             "--min-alleles", "2", "--max-alleles", "2",
-            "--type", "snps",
-            "--include", f"ID!='.' && MAF[0]>={maf}",
+            "--types", "snps",
+            "--min-af", f"{maf}:minor",
+            "--include", 'ID!="."',
             "--output-type", "z",
             "--output", str(out),
             str(vcf),
