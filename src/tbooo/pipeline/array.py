@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, log, run
+from tbooo.utils import bgzip_test, ensure_dirs, log, run
 
 _CM_MAP_GLOB = "genetic_map_GRCh37_chr{chrom}.txt"
 
@@ -100,6 +100,45 @@ def _filter_to_array_sites(cfg: Config, chrom: str, vcf: Path, out: Path) -> Non
             str(vcf),
         ])
     run([bcftools, "index", "--tbi", str(out)])
+
+    # Sanity-check: a 0-variant filtered VCF crashes plink2 with a cryptic error.
+    # Detect it now and diagnose whether the input VCF is corrupt.
+    n = _count_variants(bcftools, out)
+    if n == 0:
+        _diagnose_empty_filter(cfg, chrom, vcf)
+    log(f"  filtered chr{chrom}: {n:,} variants")
+
+
+def _count_variants(bcftools: str, vcf: Path) -> int:
+    proc = run([bcftools, "index", "--stats", str(vcf)], capture=True)
+    total = 0
+    for line in proc.stdout.decode().splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[-1].isdigit():
+            total += int(parts[-1])
+    return total
+
+
+def _diagnose_empty_filter(cfg: Config, chrom: str, vcf: Path) -> None:
+    """Raise with actionable guidance when the filtered VCF has 0 variants."""
+    check = bgzip_test(vcf)
+    if check is False:
+        raise RuntimeError(
+            f"chr{chrom}: input 1KGP VCF appears corrupt (bgzip integrity check failed).\n"
+            f"  Path: {vcf}\n"
+            f"  Fix:  rm '{vcf}' '{vcf}.tbi' && "
+            f"tbooo download 1kg --chroms {chrom} --deep-check"
+        )
+    if check is None:
+        hint = "Install `bgzip` to enable input integrity verification."
+    else:
+        hint = (
+            f"Input VCF is intact — filter yielded 0 matches. "
+            f"Check `array_manifest` or `array_proxy_maf={cfg.array_proxy_maf}` threshold."
+        )
+    raise RuntimeError(
+        f"chr{chrom}: filter produced 0 variants from {vcf.name}. {hint}"
+    )
 
 
 def _manifest_to_regions(manifest: Path, chrom: str, tmp_dir: Path) -> Path:
