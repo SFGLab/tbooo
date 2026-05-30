@@ -49,8 +49,8 @@ def _process_chrom(cfg: Config, chrom: str, vcf: Path, eid_map: pd.DataFrame) ->
     # Step 1: filter to array sites
     _filter_to_array_sites(cfg, chrom, vcf, tmp)
 
-    # Step 2: VCF → PLINK (plink2 handles multi-allelic decomposition)
-    run([
+    # Step 2: VCF → PLINK (plink2 handles MAF + biallelic decomposition)
+    plink_cmd = [
         cfg.tools.plink2,
         "--vcf", str(tmp),
         "--max-alleles", "2",
@@ -59,7 +59,12 @@ def _process_chrom(cfg: Config, chrom: str, vcf: Path, eid_map: pd.DataFrame) ->
         "--out", str(stem),
         "--chr", chrom,
         "--no-psam-pheno",
-    ])
+    ]
+    # Apply MAF cutoff at the plink2 stage (only when running the proxy filter —
+    # an explicit manifest already restricts to chosen sites, no MAF gate there).
+    if not (cfg.array_manifest and Path(cfg.array_manifest).exists()):
+        plink_cmd += ["--maf", str(cfg.array_proxy_maf)]
+    run(plink_cmd)
 
     # Step 3: rewrite FAM with EIDs and batch codes
     _rewrite_fam(stem.with_suffix(".fam"), eid_map)
@@ -88,17 +93,14 @@ def _filter_to_array_sites(cfg: Config, chrom: str, vcf: Path, out: Path) -> Non
             str(vcf),
         ])
     else:
-        # Proxy: biallelic SNPs with rsID and MAF >= threshold.
-        # `--min-af X:minor` filters on the minor allele frequency directly;
-        # using an `--include 'MAF[0]>=...'` expression yields 0 matches against
-        # Phase 3 INFO (only AF/AC/AN are present, MAF isn't a tag).
-        log(f"  no manifest — proxy filter: biallelic SNPs, MAF>={maf}, rsID (chr{chrom})…")
+        # Proxy filter: biallelic SNPs only. MAF is applied later by plink2 (its
+        # native allele-frequency machinery is more reliable than bcftools'
+        # MAF/--min-af expressions on Phase 3 INFO, which silently yield 0 matches).
+        log(f"  no manifest — proxy filter: biallelic SNPs (chr{chrom}); MAF>={maf} applied at plink2 stage…")
         run([
             bcftools, "view",
             "--min-alleles", "2", "--max-alleles", "2",
             "--types", "snps",
-            "--min-af", f"{maf}:minor",
-            "--include", 'ID!="."',
             "--output-type", "z",
             "--output", str(out),
             str(vcf),
