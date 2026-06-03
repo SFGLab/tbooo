@@ -61,6 +61,12 @@ class Config:
     # parallel workers for `bgzip -t` deep integrity checks (opt-in via --deep-check)
     deep_check_workers: int = 8
 
+    # `bcftools --threads N` per task in the WGS pVCF stage.
+    # Each parallel chromosome job uses these threads, so total CPU ≈ jobs × threads.
+    wgs_nygc_threads: int = 4         # NYGC reheader + index (one multi-sample VCF; I/O bound)
+    wgs_sgdp_merge_threads: int = 8   # SGDP ~280-way merge (compute heavy)
+    wgs_final_merge_threads: int = 4  # final NYGC + SGDP merge per chromosome
+
     @classmethod
     def load(cls, path: Path | str = "config.yaml") -> "Config":
         with open(path) as f:

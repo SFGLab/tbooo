@@ -181,10 +181,14 @@ def _build_nygc_pvcf(cfg: Config, chroms: list[str]) -> None:
             log(f"  SKIP: NYGC VCF not found: {src.name}")
             continue
 
-        log(f"  [nygc pVCF] chr{chrom}")
-        run([cfg.tools.bcftools, "reheader", "--samples", str(rename_file),
+        threads = max(1, cfg.wgs_nygc_threads)
+        log(f"  [nygc pVCF] chr{chrom} (threads={threads})")
+        run([cfg.tools.bcftools, "reheader",
+             "--samples", str(rename_file),
+             "--threads", str(threads),
              "--output", str(out), str(src)])
-        run([cfg.tools.bcftools, "index", "--tbi", str(out)])
+        run([cfg.tools.bcftools, "index", "--tbi",
+             "--threads", str(threads), str(out)])
         log(f"    → {out.name}")
 
 
@@ -201,9 +205,17 @@ def _build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
         return
 
     pvcf_dir = cfg.sgdp_raw_dir() / "pvcf"
-    ensure_dirs(pvcf_dir)
-    ensure_dirs(cfg.tmp_dir)
+    ensure_dirs(pvcf_dir, cfg.tmp_dir)
     log(f"[sgdp pVCF] {len(sample_vcfs)} sample VCF(s) found")
+
+    # Detect chromosome naming once (chrN vs N) from the first file's tabix index.
+    chrom_prefix = _detect_chrom_prefix(cfg, sample_vcfs[0])
+
+    # Write a stable file-of-filenames so the merge command stays short.
+    list_file = cfg.tmp_dir / "sgdp_vcf_list.txt"
+    list_file.write_text("\n".join(str(v) for v in sample_vcfs) + "\n")
+
+    threads = max(1, cfg.wgs_sgdp_merge_threads)
 
     for chrom in chroms:
         out = cfg.sgdp_pvcf(chrom)
@@ -211,36 +223,41 @@ def _build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
             log(f"  skip (exists): {out.name}")
             continue
 
-        log(f"  [sgdp pVCF] chr{chrom}")
-        tmp_per_sample: list[Path] = []
+        region = f"{chrom_prefix}{chrom}"
+        tmp_merged = cfg.tmp_dir / f"sgdp_merged_chr{chrom}.vcf.gz"
 
-        for vcf in sample_vcfs:
-            tmp = cfg.tmp_dir / f"sgdp_{vcf.stem}_chr{chrom}.vcf.gz"
-            run([cfg.tools.bcftools, "view", "--regions", chrom,
-                 "--output-type", "z", "--output", str(tmp), str(vcf)])
-            run([cfg.tools.bcftools, "index", "--tbi", str(tmp)])
-            tmp_per_sample.append(tmp)
+        log(f"  [sgdp pVCF] chr{chrom} — merging {len(sample_vcfs)} samples in one pass "
+            f"(region={region}, threads={threads})")
+        # One `bcftools merge` reads each sample's pre-built tabix index for the
+        # requested region only — no per-sample view/index step required.
+        run([cfg.tools.bcftools, "merge",
+             "--file-list", str(list_file),
+             "--regions", region,
+             "--threads", str(threads),
+             "--output-type", "z",
+             "--output", str(tmp_merged)])
 
-        if len(tmp_per_sample) == 1:
-            tmp_merged = tmp_per_sample[0]
-        else:
-            tmp_merged = cfg.tmp_dir / f"sgdp_merged_chr{chrom}.vcf.gz"
-            run([cfg.tools.bcftools, "merge", "--output-type", "z",
-                 "--output", str(tmp_merged)] + [str(v) for v in tmp_per_sample])
-            run([cfg.tools.bcftools, "index", "--tbi", str(tmp_merged)])
+        # Reheader (rename samples → EIDs) writes the final output.
+        run([cfg.tools.bcftools, "reheader",
+             "--samples", str(rename_file),
+             "--threads", str(threads),
+             "--output", str(out),
+             str(tmp_merged)])
+        run([cfg.tools.bcftools, "index", "--tbi",
+             "--threads", str(threads), str(out)])
 
-        run([cfg.tools.bcftools, "reheader", "--samples", str(rename_file),
-             "--output", str(out), str(tmp_merged)])
-        run([cfg.tools.bcftools, "index", "--tbi", str(out)])
-
-        for tmp in tmp_per_sample:
-            tmp.unlink(missing_ok=True)
-            Path(str(tmp) + ".tbi").unlink(missing_ok=True)
-        if tmp_merged not in tmp_per_sample:
-            tmp_merged.unlink(missing_ok=True)
-            Path(str(tmp_merged) + ".tbi").unlink(missing_ok=True)
-
+        tmp_merged.unlink(missing_ok=True)
         log(f"    → {out.name}")
+
+
+def _detect_chrom_prefix(cfg: Config, vcf: Path) -> str:
+    """Return 'chr' if the VCF's contigs use a chr-prefix, else ''."""
+    proc = run([cfg.tools.bcftools, "index", "--stats", str(vcf)], capture=True)
+    for line in proc.stdout.decode().splitlines():
+        parts = line.split()
+        if parts and parts[0] not in ("", "*"):
+            return "chr" if parts[0].startswith("chr") else ""
+    return ""
 
 
 def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
@@ -271,9 +288,13 @@ def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
             if tbi_src.exists() and not tbi_dst.exists():
                 tbi_dst.symlink_to(tbi_src.resolve())
         else:
-            run([cfg.tools.bcftools, "merge", "--output-type", "z",
+            threads = max(1, cfg.wgs_final_merge_threads)
+            run([cfg.tools.bcftools, "merge",
+                 "--threads", str(threads),
+                 "--output-type", "z",
                  "--output", str(out)] + [str(s) for s in sources])
-            run([cfg.tools.bcftools, "index", "--tbi", str(out)])
+            run([cfg.tools.bcftools, "index", "--tbi",
+                 "--threads", str(threads), str(out)])
 
         log(f"    → {out.name}")
 
