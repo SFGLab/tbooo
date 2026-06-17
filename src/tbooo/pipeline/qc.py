@@ -66,7 +66,7 @@ def _merge_array_plink(cfg: Config) -> Path:
     stems: list[Path] = []
     for chrom in cfg.autosomes:
         stem = cfg.array_stem(str(chrom))
-        if stem.with_suffix(".bed").exists():
+        if plink_ok(stem):
             stems.append(stem)
 
     if not stems:
