@@ -19,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
+from tbooo.integrity import bgen_ok, ensure, plink_ok, remove, vcf_ok
 from tbooo.utils import ensure_dirs, log, run
 
 _GRCH38_FASTA = "GRCh38/GRCh38_full_analysis_set_plus_decoy_hla.fa"
@@ -57,12 +58,36 @@ def _process_chrom(
     rename_file: Path,
     sample_path: Path,
 ) -> None:
+    plink_stem = cfg.wes_stem(chrom)
+    bgen_stem = cfg.wes_bgen_stem(chrom)
+
+    def _purge() -> None:
+        remove(Path(str(plink_stem) + ".bed"), Path(str(plink_stem) + ".bim"),
+               Path(str(plink_stem) + ".fam"), Path(str(plink_stem) + ".log"),
+               Path(str(bgen_stem) + ".bgen"), Path(str(bgen_stem) + ".bgen.bgi"))
+
+    ensure(
+        f"{plink_stem.name} (wes chr{chrom})",
+        check=lambda: plink_ok(plink_stem) and bgen_ok(bgen_stem),
+        purge=_purge,
+        build=lambda: _build_chrom(cfg, chrom, src_vcf, exome_bed,
+                                   rename_file, sample_path, plink_stem, bgen_stem),
+    )
+
+
+def _build_chrom(
+    cfg: Config,
+    chrom: str,
+    src_vcf: Path,
+    exome_bed: Path,
+    rename_file: Path,
+    sample_path: Path,
+    plink_stem: Path,
+    bgen_stem: Path,
+) -> None:
     ensure_dirs(cfg.tmp_dir)
     tmp_intersected = cfg.tmp_dir / f"wes_chr{chrom}_intersected.vcf.gz"
     tmp_reheadered = cfg.tmp_dir / f"wes_chr{chrom}_eid.vcf.gz"
-
-    plink_stem = cfg.wes_stem(chrom)
-    bgen_stem = cfg.wes_bgen_stem(chrom)
 
     # Step 1: intersect with exome BED
     _intersect_exome(cfg, chrom, src_vcf, exome_bed, tmp_intersected)
@@ -139,9 +164,10 @@ def _process_chrom(
 def _intersect_exome(
     cfg: Config, chrom: str, vcf: Path, bed: Path, out: Path
 ) -> None:
-    if out.exists():
-        log(f"  skip (exists): {out.name}")
+    if vcf_ok(out):
+        log(f"  reusing intersected VCF (chr{chrom})")
         return
+    remove(out, Path(str(out) + ".tbi"))  # clear any partial intersect from a prior crash
     log(f"  intersecting with exome BED (chr{chrom})…")
     # bcftools uses 1-based regions; BED is 0-based — bcftools handles this correctly
     # when using --regions-file with a BED file (it auto-detects BED format by filename)

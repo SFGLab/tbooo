@@ -23,6 +23,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from tbooo.config import Config
+from tbooo.integrity import parquet_ok
 from tbooo.utils import ensure_dirs, log
 
 # UKB Field 21000 (ethnic background) — Data-Coding 1001
@@ -70,6 +71,11 @@ _NULL_FIELDS: list[str] = [
 
 def build_phenotype_table(cfg: Config) -> None:
     ensure_dirs(cfg.showcase_dir())
+
+    out = cfg.showcase_dir() / "participant.parquet"
+    if parquet_ok(out):
+        log(f"  skip (valid): {out.name}")
+        return
 
     frames: list[pd.DataFrame] = []
 

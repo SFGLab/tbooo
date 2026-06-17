@@ -20,7 +20,8 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.utils import ensure_dirs, eid_prefix_dir, log, run
+from tbooo.integrity import ensure, ensure_vcf, remove, symlink_ok, vcf_ok
+from tbooo.utils import ensure_dirs, eid_prefix_dir, has_bgzf_eof, log, run
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -81,8 +82,10 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
         ensure_dirs(dest_dir)
         dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
 
-        if dest_vcf.exists():
+        if vcf_ok(dest_vcf):
             continue
+        # Drop any partial remains from an interrupted run before rebuilding.
+        remove(dest_vcf, Path(str(dest_vcf) + ".tbi"))
 
         # Per-chromosome extraction
         tmp_chroms: list[Path] = []
@@ -150,11 +153,9 @@ def _symlink_sgdp_gvcfs(cfg: Config) -> None:
         dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
         dest_tbi = dest_dir / f"{eid}_23151_0_0.g.vcf.gz.tbi"
 
-        if not dest_vcf.exists() and src_vcf.exists():
-            dest_vcf.symlink_to(src_vcf)
+        if _relink(dest_vcf, src_vcf):
             linked += 1
-        if not dest_tbi.exists() and src_tbi.exists():
-            dest_tbi.symlink_to(src_tbi)
+        _relink(dest_tbi, src_tbi)
 
     log(f"  linked {linked} SGDP gVCF(s) → {cfg.wgs_dir()}/")
 
@@ -172,24 +173,23 @@ def _build_nygc_pvcf(cfg: Config, chroms: list[str]) -> None:
 
     for chrom in chroms:
         out = cfg.nygc_pvcf(chrom)
-        if out.exists():
-            log(f"  skip (exists): {out.name}")
-            continue
-
         src = cfg.nygc_vcf(chrom)
         if not src.exists():
             log(f"  SKIP: NYGC VCF not found: {src.name}")
             continue
 
-        threads = max(1, cfg.wgs_nygc_threads)
-        log(f"  [nygc pVCF] chr{chrom} (threads={threads})")
-        run([cfg.tools.bcftools, "reheader",
-             "--samples", str(rename_file),
-             "--threads", str(threads),
-             "--output", str(out), str(src)])
-        run([cfg.tools.bcftools, "index", "--tbi",
-             "--threads", str(threads), str(out)])
-        log(f"    → {out.name}")
+        def _build(out=out, src=src) -> None:
+            threads = max(1, cfg.wgs_nygc_threads)
+            log(f"  [nygc pVCF] chr{chrom} (threads={threads})")
+            run([cfg.tools.bcftools, "reheader",
+                 "--samples", str(rename_file),
+                 "--threads", str(threads),
+                 "--output", str(out), str(src)])
+            run([cfg.tools.bcftools, "index", "--tbi",
+                 "--threads", str(threads), str(out)])
+            log(f"    → {out.name}")
+
+        ensure_vcf(out.name, out, _build)
 
 
 def _build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
@@ -219,35 +219,35 @@ def _build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
 
     for chrom in chroms:
         out = cfg.sgdp_pvcf(chrom)
-        if out.exists():
-            log(f"  skip (exists): {out.name}")
-            continue
-
         region = f"{chrom_prefix}{chrom}"
         tmp_merged = cfg.tmp_dir / f"sgdp_merged_chr{chrom}.vcf.gz"
 
-        log(f"  [sgdp pVCF] chr{chrom} — merging {len(sample_vcfs)} samples in one pass "
-            f"(region={region}, threads={threads})")
-        # One `bcftools merge` reads each sample's pre-built tabix index for the
-        # requested region only — no per-sample view/index step required.
-        run([cfg.tools.bcftools, "merge",
-             "--file-list", str(list_file),
-             "--regions", region,
-             "--threads", str(threads),
-             "--output-type", "z",
-             "--output", str(tmp_merged)])
+        def _build(out=out, region=region, tmp_merged=tmp_merged) -> None:
+            log(f"  [sgdp pVCF] chr{chrom} — merging {len(sample_vcfs)} samples in one pass "
+                f"(region={region}, threads={threads})")
+            # One `bcftools merge` reads each sample's pre-built tabix index for the
+            # requested region only — no per-sample view/index step required.
+            run([cfg.tools.bcftools, "merge",
+                 "--file-list", str(list_file),
+                 "--regions", region,
+                 "--threads", str(threads),
+                 "--output-type", "z",
+                 "--output", str(tmp_merged)])
 
-        # Reheader (rename samples → EIDs) writes the final output.
-        run([cfg.tools.bcftools, "reheader",
-             "--samples", str(rename_file),
-             "--threads", str(threads),
-             "--output", str(out),
-             str(tmp_merged)])
-        run([cfg.tools.bcftools, "index", "--tbi",
-             "--threads", str(threads), str(out)])
+            # Reheader (rename samples → EIDs) writes the final output.
+            run([cfg.tools.bcftools, "reheader",
+                 "--samples", str(rename_file),
+                 "--threads", str(threads),
+                 "--output", str(out),
+                 str(tmp_merged)])
+            run([cfg.tools.bcftools, "index", "--tbi",
+                 "--threads", str(threads), str(out)])
 
-        tmp_merged.unlink(missing_ok=True)
-        log(f"    → {out.name}")
+            tmp_merged.unlink(missing_ok=True)
+            log(f"    → {out.name}")
+
+        # Purge the half-built merge tmp too, so a rebuild can't reuse stale state.
+        ensure_vcf(out.name, out, _build, tmp=(tmp_merged,))
 
 
 def _detect_chrom_prefix(cfg: Config, vcf: Path) -> str:
@@ -266,10 +266,7 @@ def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
 
     for chrom in chroms:
         out = cfg.wgs_pvcf(chrom)
-        if out.exists():
-            log(f"  skip (exists): {out.name}")
-            continue
-
+        out_tbi = Path(str(out) + ".tbi")
         nygc = cfg.nygc_pvcf(chrom)
         sgdp = cfg.sgdp_pvcf(chrom)
         sources = [p for p in (nygc, sgdp) if p.exists()]
@@ -278,25 +275,43 @@ def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
             log(f"  SKIP chr{chrom}: no intermediate pVCFs available")
             continue
 
-        log(f"  [merge pVCF] chr{chrom} ({'+'.join(p.stem for p in sources)})")
-
         if len(sources) == 1:
-            # Only one cohort available — symlink rather than copy
-            out.symlink_to(sources[0].resolve())
-            tbi_src = Path(str(sources[0]) + ".tbi")
-            tbi_dst = Path(str(out) + ".tbi")
-            if tbi_src.exists() and not tbi_dst.exists():
-                tbi_dst.symlink_to(tbi_src.resolve())
-        else:
-            threads = max(1, cfg.wgs_final_merge_threads)
-            run([cfg.tools.bcftools, "merge",
-                 "--threads", str(threads),
-                 "--output-type", "z",
-                 "--output", str(out)] + [str(s) for s in sources])
-            run([cfg.tools.bcftools, "index", "--tbi",
-                 "--threads", str(threads), str(out)])
+            src = sources[0]
 
-        log(f"    → {out.name}")
+            def _check(out=out, out_tbi=out_tbi) -> bool:
+                # Symlinked single-cohort output: link resolves to an intact BGZF
+                # file and its .tbi symlink is not dangling.
+                return symlink_ok(out, has_bgzf_eof) and symlink_ok(out_tbi)
+
+            def _build(out=out, out_tbi=out_tbi, src=src) -> None:
+                log(f"  [merge pVCF] chr{chrom} ({src.stem}, single cohort → symlink)")
+                out.symlink_to(src.resolve())
+                tbi_src = Path(str(src) + ".tbi")
+                if tbi_src.exists():
+                    out_tbi.symlink_to(tbi_src.resolve())
+                log(f"    → {out.name}")
+        else:
+            def _check(out=out) -> bool:
+                return vcf_ok(out)
+
+            def _build(out=out, sources=tuple(sources)) -> None:
+                threads = max(1, cfg.wgs_final_merge_threads)
+                log(f"  [merge pVCF] chr{chrom} ({'+'.join(p.stem for p in sources)})")
+                run([cfg.tools.bcftools, "merge",
+                     "--threads", str(threads),
+                     "--output-type", "z",
+                     "--output", str(out)] + [str(s) for s in sources])
+                run([cfg.tools.bcftools, "index", "--tbi",
+                     "--threads", str(threads), str(out)])
+                log(f"    → {out.name}")
+
+        ensure(
+            out.name,
+            check=_check,
+            build=_build,
+            purge=lambda out=out, out_tbi=out_tbi: remove(
+                out, out_tbi, Path(str(out) + ".csi")),
+        )
 
 
 # ── CRAM internals ────────────────────────────────────────────────────────────
@@ -322,10 +337,22 @@ def _symlink_cram(cfg: Config, eid: int, src_cram: Path, src_crai: Path) -> None
     ensure_dirs(dest_dir)
     dest_cram = dest_dir / f"{eid}_23149_0_0.cram"
     dest_crai = dest_dir / f"{eid}_23149_0_0.cram.crai"
-    if not dest_cram.exists() and src_cram.exists():
-        dest_cram.symlink_to(src_cram.resolve())
-    if not dest_crai.exists() and src_crai.exists():
-        dest_crai.symlink_to(src_crai.resolve())
+    _relink(dest_cram, src_cram)
+    _relink(dest_crai, src_crai)
+
+
+def _relink(dest: Path, src: Path) -> bool:
+    """Point `dest` at `src` via symlink; recreate it if missing or dangling.
+
+    Returns True if a (re)link was performed. A valid existing symlink is left alone.
+    """
+    if not src.exists():
+        return False
+    if symlink_ok(dest):
+        return False
+    remove(dest)
+    dest.symlink_to(src.resolve())
+    return True
 
 
 def _load_eid_map(cfg: Config, filename: str) -> pd.DataFrame:

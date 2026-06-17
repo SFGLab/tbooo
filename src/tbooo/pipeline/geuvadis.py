@@ -25,6 +25,7 @@ import pyarrow.parquet as pq
 from sklearn.decomposition import PCA
 
 from tbooo.config import Config
+from tbooo.integrity import table_ok
 from tbooo.utils import ensure_dirs, log
 
 N_PCS = 20
@@ -51,6 +52,15 @@ def build_expression_pcs(cfg: Config) -> None:
         )
 
     ensure_dirs(cfg.metadata_dir())
+
+    out_pcs = cfg.metadata_dir() / "geuvadis_expression_pcs.tsv"
+    out_var = cfg.metadata_dir() / "geuvadis_pca_variance.tsv"
+    if table_ok(out_pcs, min_lines=2) and table_ok(out_var, min_lines=2):
+        # PCA already computed and intact — skip the expensive recompute.
+        # (The parquet patch below only applies if participant.parquet already
+        # exists; in a full run geuvadis precedes phenotypes, so it is a no-op here.)
+        log(f"  skip (valid): {out_pcs.name} + {out_var.name}")
+        return
 
     log("Loading GEUVADIS RPKM matrix…")
     rpkm = _load_rpkm(rpkm_path)

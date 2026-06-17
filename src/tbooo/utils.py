@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Sequence
+
+
+class CommandError(subprocess.CalledProcessError):
+    """CalledProcessError that surfaces the captured stderr tail in its message.
+
+    Subclasses CalledProcessError so existing `except subprocess.CalledProcessError`
+    handlers keep working, but the traceback now shows *why* the command failed
+    instead of a bare exit status.
+    """
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        if self.stderr:
+            tail = "".join(str(self.stderr).splitlines(keepends=True)[-30:])
+            return f"{base}\n--- stderr (last 30 lines) ---\n{tail}"
+        return base
 
 
 def run(
@@ -17,11 +34,35 @@ def run(
 ) -> subprocess.CompletedProcess:
     if isinstance(cmd, str):
         cmd = cmd.split()
-    kwargs: dict = {"cwd": cwd}
+    cmd = list(cmd)
+
     if capture:
-        kwargs["stdout"] = subprocess.PIPE
-        kwargs["stderr"] = subprocess.PIPE
-    return subprocess.run(list(cmd), check=check, **kwargs)
+        # Caller wants the output back, not on the console — full capture, no echo.
+        return subprocess.run(
+            cmd, check=check, cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+
+    # Default: stream output live (stdout inherits the terminal; stderr is teed so
+    # progress bars using '\r' still render) AND capture stderr, so that on failure
+    # the raised error carries the real diagnostic instead of just "exit status N".
+    proc = subprocess.Popen(cmd, cwd=cwd, stderr=subprocess.PIPE)
+    err = bytearray()
+    assert proc.stderr is not None
+    err_fd = proc.stderr.fileno()
+    while True:
+        chunk = os.read(err_fd, 65536)
+        if not chunk:
+            break
+        sys.stderr.buffer.write(chunk)
+        sys.stderr.buffer.flush()
+        err.extend(chunk)
+    proc.stderr.close()
+    returncode = proc.wait()
+    stderr_text = err.decode("utf-8", errors="replace")
+    if check and returncode != 0:
+        raise CommandError(returncode, cmd, output=None, stderr=stderr_text)
+    return subprocess.CompletedProcess(cmd, returncode, None, stderr_text)
 
 
 def check_tools(tools_dict: dict[str, str]) -> None:

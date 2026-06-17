@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
+from tbooo.integrity import ensure_bgen, ensure_table
 from tbooo.utils import ensure_dirs, log, run
 
 _GRCH37_FASTA = "GRCh37/human_g1k_v37.fasta"
@@ -51,6 +52,23 @@ def _process_chrom(
     sample_path: Path,
 ) -> None:
     stem = cfg.imputed_stem(chrom)
+    chrom_sample = Path(str(stem) + ".sample")
+    ensure_bgen(
+        f"{stem.name} (imputed chr{chrom})",
+        stem,
+        lambda: _build_chrom(cfg, chrom, vcf, rename_file, sample_path, stem),
+        extra=(chrom_sample,),
+    )
+
+
+def _build_chrom(
+    cfg: Config,
+    chrom: str,
+    vcf: Path,
+    rename_file: Path,
+    sample_path: Path,
+    stem: Path,
+) -> None:
     tmp_norm = cfg.tmp_dir / f"imputed_chr{chrom}_norm.vcf.gz"
     tmp_reheadered = cfg.tmp_dir / f"imputed_chr{chrom}_eid.vcf.gz"
     ensure_dirs(cfg.tmp_dir)
@@ -122,16 +140,17 @@ def _process_chrom(
 
 def _write_sample_file(eid_map: pd.DataFrame, path: Path) -> None:
     """Write a GEN2-format .sample file for BGEN."""
-    if path.exists():
-        log(f"  skip (exists): {path.name}")
-        return
-    lines = ["ID_1 ID_2 missing sex\n", "0 0 0 D\n"]
-    for _, row in eid_map.iterrows():
-        eid = row["eid"]
-        sex = int(row.get("sex", 0))
-        lines.append(f"{eid} {eid} 0 {sex}\n")
-    path.write_text("".join(lines))
-    log(f"  wrote sample file: {path} ({len(eid_map)} samples)")
+    def _build() -> None:
+        lines = ["ID_1 ID_2 missing sex\n", "0 0 0 D\n"]
+        for _, row in eid_map.iterrows():
+            eid = row["eid"]
+            sex = int(row.get("sex", 0))
+            lines.append(f"{eid} {eid} 0 {sex}\n")
+        path.write_text("".join(lines))
+        log(f"  wrote sample file: {path} ({len(eid_map)} samples)")
+
+    # header (2 lines) + at least one sample row
+    ensure_table(path.name, path, _build, min_lines=3)
 
 
 def _load_eid_map(cfg: Config) -> pd.DataFrame:

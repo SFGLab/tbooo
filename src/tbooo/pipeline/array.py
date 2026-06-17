@@ -21,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
+from tbooo.integrity import ensure_plink, remove, vcf_ok
 from tbooo.utils import bgzip_test, ensure_dirs, log, run
 
 _CM_MAP_GLOB = "genetic_map_GRCh37_chr{chrom}.txt"
@@ -43,43 +44,52 @@ def run_array_pipeline(cfg: Config, chroms: list[str]) -> None:
 
 def _process_chrom(cfg: Config, chrom: str, vcf: Path, eid_map: pd.DataFrame) -> None:
     stem = cfg.array_stem(chrom)
-    tmp = cfg.tmp_dir / f"array_chr{chrom}_filtered.vcf.gz"
-    ensure_dirs(cfg.tmp_dir)
 
-    # Step 1: filter to array sites
-    _filter_to_array_sites(cfg, chrom, vcf, tmp)
+    def _build() -> None:
+        tmp = cfg.tmp_dir / f"array_chr{chrom}_filtered.vcf.gz"
+        ensure_dirs(cfg.tmp_dir)
 
-    # Step 2: VCF → PLINK (plink2 handles MAF + biallelic decomposition)
-    plink_cmd = [
-        cfg.tools.plink2,
-        "--vcf", str(tmp),
-        "--max-alleles", "2",
-        "--snps-only", "just-acgt",
-        "--make-bed",
-        "--out", str(stem),
-        "--chr", chrom,
-        "--no-psam-pheno",
-    ]
-    # Apply MAF cutoff at the plink2 stage (only when running the proxy filter —
-    # an explicit manifest already restricts to chosen sites, no MAF gate there).
-    if not (cfg.array_manifest and Path(cfg.array_manifest).exists()):
-        plink_cmd += ["--maf", str(cfg.array_proxy_maf)]
-    run(plink_cmd)
+        # Step 1: filter to array sites
+        _filter_to_array_sites(cfg, chrom, vcf, tmp)
 
-    # Step 3: rewrite FAM with EIDs and batch codes
-    _rewrite_fam(stem.with_suffix(".fam"), eid_map)
+        # Step 2: VCF → PLINK (plink2 handles MAF + biallelic decomposition)
+        plink_cmd = [
+            cfg.tools.plink2,
+            "--vcf", str(tmp),
+            "--max-alleles", "2",
+            "--snps-only", "just-acgt",
+            "--make-bed",
+            "--out", str(stem),
+            "--chr", chrom,
+            "--no-psam-pheno",
+        ]
+        # Apply MAF cutoff at the plink2 stage (only when running the proxy filter —
+        # an explicit manifest already restricts to chosen sites, no MAF gate there).
+        if not (cfg.array_manifest and Path(cfg.array_manifest).exists()):
+            plink_cmd += ["--maf", str(cfg.array_proxy_maf)]
+        run(plink_cmd)
 
-    # Step 4: inject cM positions into BIM
-    _inject_cm(cfg, chrom, stem.with_suffix(".bim"))
+        # Step 3: rewrite FAM with EIDs and batch codes
+        _rewrite_fam(stem.with_suffix(".fam"), eid_map)
 
-    tmp.unlink(missing_ok=True)
-    log(f"  done → {stem}.bed/bim/fam")
+        # Step 4: inject cM positions into BIM
+        _inject_cm(cfg, chrom, stem.with_suffix(".bim"))
+
+        tmp.unlink(missing_ok=True)
+        log(f"  done → {stem}.bed/bim/fam")
+
+    ensure_plink(f"{stem.name} (array chr{chrom})", stem, _build)
 
 
 def _filter_to_array_sites(cfg: Config, chrom: str, vcf: Path, out: Path) -> None:
     manifest = cfg.array_manifest
     bcftools = cfg.tools.bcftools
     maf = cfg.array_proxy_maf
+
+    if vcf_ok(out):
+        log(f"  reusing filtered VCF (chr{chrom})")
+        return
+    remove(out, Path(str(out) + ".tbi"))  # clear any partial filter from a prior crash
 
     if manifest and Path(manifest).exists():
         # Use the manifest as a regions filter

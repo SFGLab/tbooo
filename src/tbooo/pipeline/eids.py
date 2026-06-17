@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
+from tbooo.integrity import remove, table_ok
 from tbooo.utils import ensure_dirs, log
 
 # 1KGP superpop → batch code (used in FAM column 6)
@@ -32,6 +33,11 @@ def assign_eids(cfg: Config) -> None:
 def _assign_1kg(cfg: Config) -> None:
     out_map = cfg.metadata_dir() / "eid_map_1kg.tsv"
     out_rename = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
+
+    if table_ok(out_map, min_lines=2) and table_ok(out_rename, min_lines=1):
+        log(f"  skip (valid): {out_map.name} + {out_rename.name}")
+        return
+    remove(out_map, out_rename)  # clear any partial write before rebuilding
 
     # Try NYGC panel first (3,202 samples); fall back to Phase 3 panel (2,504)
     nygc_panel = cfg.kg_raw_dir() / "20130606_g1k_3202_samples_ped_population.txt"
@@ -137,6 +143,11 @@ def _read_nygc_panel(path: Path) -> pd.DataFrame:
 def _assign_sgdp(cfg: Config) -> None:
     out_map = cfg.metadata_dir() / "eid_map_sgdp.tsv"
     out_rename = cfg.metadata_dir() / "vcf_sample_rename_sgdp.txt"
+
+    if table_ok(out_map, min_lines=2) and table_ok(out_rename, min_lines=1):
+        log(f"  skip (valid): {out_map.name} + {out_rename.name}")
+        return
+    remove(out_map, out_rename)  # clear any partial write before rebuilding
 
     samples_tsv = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
     if not samples_tsv.exists():

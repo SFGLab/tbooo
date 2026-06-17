@@ -25,6 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
+from tbooo.integrity import plink_ok, table_ok
 from tbooo.utils import ensure_dirs, log, run
 
 _KINSHIP_THRESHOLD = 0.0442  # 3rd-degree relatives and closer
@@ -32,6 +33,13 @@ _KINSHIP_THRESHOLD = 0.0442  # 3rd-degree relatives and closer
 
 def build_qc_files(cfg: Config) -> None:
     ensure_dirs(cfg.metadata_dir(), cfg.tmp_dir)
+
+    sqc_out = cfg.metadata_dir() / "ukb_sqc_v2.txt"
+    rel_out = cfg.metadata_dir() / "ukb_rel.txt"
+    # ukb_rel.txt is header-only when no related pairs are found (still valid).
+    if table_ok(sqc_out, min_lines=2) and table_ok(rel_out, min_lines=1):
+        log(f"  skip (valid): {sqc_out.name} + {rel_out.name}")
+        return
 
     eid_map = _load_combined_eid_map(cfg)
     merged_plink = _merge_array_plink(cfg)
@@ -49,8 +57,8 @@ def build_qc_files(cfg: Config) -> None:
 def _merge_array_plink(cfg: Config) -> Path:
     """Merge per-chromosome array PLINK files into a single genome-wide set."""
     merged = cfg.tmp_dir / "array_merged_all_chrs"
-    if (merged.parent / (merged.name + ".bed")).exists():
-        log("  skip (exists): merged PLINK set")
+    if plink_ok(merged):
+        log("  skip (valid): merged PLINK set")
         return merged
 
     # Build merge list
@@ -90,7 +98,7 @@ def _compute_het(cfg: Config, plink_stem: Path) -> pd.DataFrame:
     het_prefix = cfg.tmp_dir / "het_stats"
     het_file = het_prefix.parent / (het_prefix.name + ".het")
 
-    if not het_file.exists():
+    if not table_ok(het_file, min_lines=2):
         run([
             cfg.tools.plink2,
             "--bfile", str(plink_stem),
@@ -119,7 +127,7 @@ def _run_king(cfg: Config, plink_stem: Path) -> pd.DataFrame:
     king_prefix = cfg.tmp_dir / "king_output"
     kin0_file = Path(str(king_prefix) + ".kin0")
 
-    if not kin0_file.exists():
+    if not table_ok(kin0_file, min_lines=1):
         try:
             run([
                 cfg.tools.king,
