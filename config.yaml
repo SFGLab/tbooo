@@ -47,13 +47,13 @@ download_workers: 4
 # Parallel `bgzip -t` workers for deep BGZF integrity checks
 # (opt-in via `tbooo download {1kg,sgdp} --deep-check`).
 # CPU-bound, so this can be much higher than `download_workers`.
-deep_check_workers: 8
+deep_check_workers: 36
 
 # `bcftools --threads N` per task in the WGS pVCF stage.
 # Each parallel chromosome job uses these threads, so total CPU ≈ jobs × threads.
-wgs_nygc_threads: 4         # NYGC reheader + index (one multi-sample VCF; I/O bound)
-wgs_sgdp_merge_threads: 8   # SGDP ~280-way merge (compute heavy)
-wgs_final_merge_threads: 4  # final NYGC + SGDP merge per chromosome
+wgs_nygc_threads: 36         # NYGC reheader + index (one multi-sample VCF; I/O bound)
+wgs_sgdp_merge_threads: 36   # SGDP ~280-way merge (compute heavy)
+wgs_final_merge_threads: 36  # final NYGC + SGDP merge per chromosome
 
 # ─── External tools ───────────────────────────────────────────────────────────
 # Override any entry if the binary is not on PATH.
