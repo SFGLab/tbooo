@@ -101,6 +101,10 @@ def _merge_array_plink(cfg: Config) -> Path:
         cfg.tools.plink2,
         "--bfile", str(first),
         "--pmerge-list", str(merge_list),
+        # Phase 3 leaves split-multiallelic SNP components sharing a position with
+        # ID '.'; plink2 can't merge those ambiguously. Give only the missing-ID
+        # variants a unique chrom:pos:ref:alt label (existing rsIDs are preserved).
+        "--set-missing-var-ids", "@:#:$r:$a",
         "--make-bed",
         "--out", str(merged),
     ])
