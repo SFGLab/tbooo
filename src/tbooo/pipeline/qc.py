@@ -148,9 +148,11 @@ def _run_king(cfg: Config, plink_stem: Path) -> pd.DataFrame:
 
     if not table_ok(kin0_file, min_lines=1):
         try:
+            # KING takes `-b <file>.bed` (not plink's `--bfile <stem>`); it locates
+            # the matching .bim/.fam from the same prefix.
             run([
                 cfg.tools.king,
-                "--bfile", str(plink_stem),
+                "-b", f"{plink_stem}.bed",
                 "--kinship",
                 "--prefix", str(king_prefix),
             ])
