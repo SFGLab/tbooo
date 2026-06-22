@@ -141,18 +141,44 @@ def _compute_het(cfg: Config, plink_stem: Path) -> pd.DataFrame:
     return het[["IID", "het_outlier"]]
 
 
+def _stage_king_input(cfg: Config, plink_stem: Path) -> Path:
+    """Stage a KING-compatible PLINK set in tmp_dir.
+
+    Two adjustments versus the merged array set, neither requiring a rebuild:
+      * FID = IID — the merged .fam has FID=0 for everyone, which KING reads as a
+        single family (emitting a within-family .kin); distinct FIDs make every
+        pair between-family so KING writes the .kin0 this module parses.
+      * phenotype column → 0 — KING parses .fam column 6 as affection status
+        (only 0/1/2/-9 valid), but our merged .fam carries the genotyping batch
+        code there, which KING rejects.
+    Only the .fam is rewritten; .bed/.bim are symlinked.
+    """
+    dst = cfg.tmp_dir / "king_input"
+    for ext in (".bed", ".bim"):
+        ln = Path(str(dst) + ext)
+        remove(ln)
+        ln.symlink_to(Path(str(plink_stem) + ext).resolve())
+
+    fam = pd.read_csv(Path(str(plink_stem) + ".fam"), sep=r"\s+", header=None)
+    fam[0] = fam[1]   # FID := IID
+    fam[5] = 0        # affection/phenotype := missing
+    fam.to_csv(Path(str(dst) + ".fam"), sep="\t", header=False, index=False)
+    return dst
+
+
 def _run_king(cfg: Config, plink_stem: Path) -> pd.DataFrame:
     """Run KING kinship estimation; return pairs above 3rd-degree threshold."""
     king_prefix = cfg.tmp_dir / "king_output"
     kin0_file = Path(str(king_prefix) + ".kin0")
 
     if not table_ok(kin0_file, min_lines=1):
+        king_in = _stage_king_input(cfg, plink_stem)
         try:
             # KING takes `-b <file>.bed` (not plink's `--bfile <stem>`); it locates
             # the matching .bim/.fam from the same prefix.
             run([
                 cfg.tools.king,
-                "-b", f"{plink_stem}.bed",
+                "-b", f"{king_in}.bed",
                 "--kinship",
                 "--prefix", str(king_prefix),
             ])
