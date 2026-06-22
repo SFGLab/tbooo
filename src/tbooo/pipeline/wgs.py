@@ -92,9 +92,11 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
         marker = split_dir / ".split-complete"
         if not marker.exists():
             ensure_dirs(split_dir)
-            log(f"  [nygc gVCF] splitting chr{chrom} into per-sample VCFs (threads={threads})…")
+            log(f"  [nygc gVCF] splitting chr{chrom} into per-sample VCFs…")
+            # `bcftools +split` is a plugin with no --threads option; only the
+            # core concat/index calls below are threaded.
             run([cfg.tools.bcftools, "+split", str(src),
-                 "--output-type", "z", "--threads", str(threads),
+                 "--output-type", "z",
                  "--output", str(split_dir)])
             marker.write_text("")
         split_dirs.append(split_dir)
