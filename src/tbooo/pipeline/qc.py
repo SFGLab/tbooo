@@ -25,7 +25,7 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.integrity import plink_ok, table_ok
+from tbooo.integrity import plink_ok, remove, table_ok
 from tbooo.utils import ensure_dirs, log, run
 
 _KINSHIP_THRESHOLD = 0.0442  # 3rd-degree relatives and closer
@@ -77,14 +77,29 @@ def _merge_array_plink(cfg: Config) -> Path:
     if len(stems) == 1:
         return stems[0]
 
-    # plink2 merge-list: first file is the target, rest go into merge-list
+    # plink2 tokenizes each --pmerge-list line on whitespace and has no quoting,
+    # so paths containing spaces (the UKB-mirrored "Genotype Results/Genotype calls"
+    # dirs do) break it. Stage space-free symlinks in tmp_dir and list those instead.
+    link_dir = cfg.tmp_dir / "array_merge_links"
+    ensure_dirs(link_dir)
+
+    def _safe_stem(s: Path) -> Path:
+        link = link_dir / s.name  # stem names (ukb22418_c*_b0_v2) are space-free
+        for ext in (".bed", ".bim", ".fam"):
+            ln = Path(str(link) + ext)
+            remove(ln)
+            ln.symlink_to(Path(str(s) + ext).resolve())
+        return link
+
+    first = _safe_stem(stems[0])
     with open(merge_list, "w") as f:
         for s in stems[1:]:
-            f.write(f"{s}.bed {s}.bim {s}.fam\n")
+            ls = _safe_stem(s)
+            f.write(f"{ls}.bed {ls}.bim {ls}.fam\n")
 
     run([
         cfg.tools.plink2,
-        "--bfile", str(stems[0]),
+        "--bfile", str(first),
         "--pmerge-list", str(merge_list),
         "--make-bed",
         "--out", str(merged),
