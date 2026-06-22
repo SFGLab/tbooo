@@ -19,7 +19,6 @@ Steps:
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -173,20 +172,21 @@ def _run_king(cfg: Config, plink_stem: Path) -> pd.DataFrame:
 
     if not table_ok(kin0_file, min_lines=1):
         king_in = _stage_king_input(cfg, plink_stem)
-        try:
-            # KING takes `-b <file>.bed` (not plink's `--bfile <stem>`); it locates
-            # the matching .bim/.fam from the same prefix.
-            run([
-                cfg.tools.king,
-                "-b", f"{king_in}.bed",
-                "--kinship",
-                "--prefix", str(king_prefix),
-            ])
-        except subprocess.CalledProcessError:
-            log("  WARNING: KING failed; relatedness file will be empty")
-            return pd.DataFrame(columns=["ID1", "ID2", "HetHet", "IBS0", "Kinship"])
+        # A KING crash is a real error — let it propagate (CommandError now carries
+        # the stderr). Swallowing it would write a bogus empty ukb_rel.txt that, being
+        # structurally valid, blocks its own repair on the next run.
+        # KING takes `-b <file>.bed` (not plink's `--bfile <stem>`); it locates the
+        # matching .bim/.fam from the same prefix.
+        run([
+            cfg.tools.king,
+            "-b", f"{king_in}.bed",
+            "--kinship",
+            "--prefix", str(king_prefix),
+        ])
 
     if not kin0_file.exists():
+        # KING ran cleanly but produced no .kin0 — genuinely no related pairs.
+        log("  KING produced no .kin0 (no related pairs); relatedness file will be empty")
         return pd.DataFrame(columns=["ID1", "ID2", "HetHet", "IBS0", "Kinship"])
 
     kin = pd.read_csv(kin0_file, sep=r"\s+")
