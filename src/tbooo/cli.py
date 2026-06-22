@@ -9,8 +9,8 @@ Usage:
     tbooo map eids            Assign synthetic EIDs to all samples
     tbooo map array           Build UKB-mirrored PLINK array files (Field 22418)
     tbooo map imputed         Build UKB-mirrored BGEN imputed files (Field 22828)
-    tbooo map wgs             Build UKB-mirrored WGS CRAMs + pVCF (Field 23149/23370)
-    tbooo map wes             Build UKB-mirrored WES PLINK/BGEN files (Field 23157)
+    tbooo map wgs             Build UKB-mirrored WGS gVCFs + pVCF (Field 24051/24310)
+    tbooo map wes             Build UKB-mirrored WES PLINK/BGEN files (Field 23158/23159)
     tbooo map geuvadis        Compute expression PCA and add geuvadis_pc* to participant.parquet
     tbooo map phenotypes      Build synthetic phenotype Parquet table
     tbooo map qc              Build sample QC and relatedness files
@@ -147,18 +147,15 @@ def map_imputed(config, chroms):
 @map.command("wgs")
 @CONFIG_OPTION
 @click.option("--chroms", default=None, help="Comma-separated chromosomes")
-@click.option("--croms/--no-croms", "do_croms", default=True, help="Rename individual CRAMs (Field 23149)")
-@click.option("--gvcf/--no-gvcf", "do_gvcf", default=False,
-              help="Build per-sample gVCFs from NYGC + SGDP (Field 23151)")
+@click.option("--gvcf/--no-gvcf", "do_gvcf", default=True,
+              help="Build per-sample gVCFs from NYGC + SGDP (Field 24051)")
 @click.option("--pvcf/--no-pvcf", "do_pvcf", default=True,
-              help="Build cohort pVCF from NYGC + SGDP merged (Field 23370)")
-def map_wgs(config, chroms, do_croms, do_gvcf, do_pvcf):
-    """Build WGS outputs (Fields 23149/23151/23370) from NYGC and SGDP VCFs."""
-    from tbooo.pipeline.wgs import rename_crams, build_gvcfs, build_pvcf
+              help="Build cohort pVCF from NYGC + SGDP merged (Field 24310)")
+def map_wgs(config, chroms, do_gvcf, do_pvcf):
+    """Build WGS outputs (Fields 24051/24310) from NYGC and SGDP VCFs."""
+    from tbooo.pipeline.wgs import build_gvcfs, build_pvcf
     cfg = _cfg(config)
     chrom_list = chroms.split(",") if chroms else cfg.chromosomes
-    if do_croms:
-        rename_crams(cfg)
     if do_gvcf:
         build_gvcfs(cfg, chrom_list)
     if do_pvcf:

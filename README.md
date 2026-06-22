@@ -16,14 +16,13 @@ data/
 │   ├── Imputed/
 │   │   └── ukb22828_c{1-22}_b0_v3.{bgen,bgen.bgi,sample}  # Field 22828 - imputed BGEN
 │   ├── Exome sequences/
-│   │   ├── Population level exome OQFE variants, PLINK format - 500k release/
-│   │   │   └── ukb23157_c{1-22}_b0_v1.{bed,bim,fam}        # Field 23157 - WES PLINK
-│   │   └── Population level exome OQFE variants, BGEN format - final release/
-│   │       └── ukb23157_c{1-22}_b0_v1.{bgen,bgen.bgi}      # Field 23157 - WES BGEN
+│   │   ├── Population level exome OQFE variants, PLINK format - Final exome release/
+│   │   │   └── ukb23158_c{1-22}_b0_v1.{bed,bim,fam}        # Field 23158 - WES PLINK
+│   │   └── Population level exome OQFE variants, BGEN format - Final exome release/
+│   │       └── ukb23159_c{1-22}_b0_v1.{bgen,bgen.bgi}      # Field 23159 - WES BGEN
 │   └── Whole genome sequences/
-│       ├── 10/1000001_23149_0_0.{cram,cram.crai}            # Field 23149 - individual CRAMs (1KGP)
-│       ├── 20/2000001_23151_0_0.{g.vcf.gz,g.vcf.gz.tbi}    # Field 23151 - individual gVCFs (SGDP)
-│       └── ukb23370_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi} # Field 23370 - 1KGP cohort pVCF
+│       ├── 20/2000001_24051_0_0.{g.vcf.gz,g.vcf.gz.tbi}    # Field 24051 - individual gVCFs (1KGP + SGDP)
+│       └── ukb24310_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi} # Field 24310 - cohort pVCF (NYGC + SGDP)
 ├── Showcase/
 │   └── participant.parquet                                   # synthetic phenotype table
 ├── raw/
@@ -191,10 +190,10 @@ tbooo map eids
 # Build each data layer
 tbooo map array       # Phase 3 VCF → PLINK (Field 22418, GRCh37)
 tbooo map imputed     # Phase 3 VCF → BGEN  (Field 22828, GRCh37)
-tbooo map wgs               # rename 1KGP CRAMs + build merged pVCF (NYGC+SGDP → Field 23370)
-tbooo map wgs --gvcf        # also extract per-sample gVCFs from NYGC + SGDP (Field 23151)
-tbooo map wgs --no-pvcf     # CRAMs only (skip pVCF build)
-tbooo map wes         # NYGC VCF ∩ exome BED → PLINK + BGEN (Field 23157, GRCh38)
+tbooo map wgs               # per-sample gVCFs (Field 24051) + merged pVCF (NYGC+SGDP → Field 24310)
+tbooo map wgs --no-pvcf     # gVCFs only (skip pVCF build)
+tbooo map wgs --no-gvcf     # pVCF only (skip per-sample gVCFs)
+tbooo map wes         # NYGC VCF ∩ exome BED → PLINK (Field 23158) + BGEN (Field 23159), GRCh38
 tbooo map geuvadis    # GEUVADIS RPKM → expression PCA → geuvadis_pc* in participant.parquet
 tbooo map phenotypes  # EID maps → Parquet with UKB column naming (p<FIELD>_i<INST>_a<ARR>)
 tbooo map qc          # PLINK --het + KING → ukb_sqc_v2.txt + ukb_rel.txt
@@ -245,8 +244,7 @@ The synthetic phenotype table (`data/Showcase/participant.parquet`) follows UKB 
 | `p22000` | 22000 | Genotyping batch code |
 | `p22418` | 22418 | Array data available |
 | `p22828` | 22828 | Imputed data available |
-| `p23149` | 23149 | WGS CRAM available (1KGP samples only) |
-| `p23151` | 23151 | Individual gVCF available (SGDP samples only) |
+| `p24051` | 24051 | WGS gVCF available (all samples) |
 | `p54_i0` | 54 | Assessment centre (synthetic) |
 | `geuvadis_pc1`–`geuvadis_pc10` | custom | Gene expression PC scores (462 1KGP samples only; null for all others) |
 

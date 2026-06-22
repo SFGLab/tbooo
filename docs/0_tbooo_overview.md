@@ -27,11 +27,10 @@ After `tbooo run --jobs N`, the output under `data/` mirrors what a UKB-approved
 |---|---|---|---|
 | `Bulk/Genotype Results/Genotype calls/` | `ukb22418_c{1-22}_b0_v2.{bed,bim,fam}` | 22418 | Array PLINK (GRCh37) |
 | `Bulk/Imputed/` | `ukb22828_c{1-22}_b0_v3.{bgen,bgen.bgi,sample}` | 22828 | Imputed BGEN (GRCh37) |
-| `Bulk/Exome sequences/…PLINK format - 500k release/` | `ukb23157_c{1-22}_b0_v1.{bed,bim,fam}` | 23157 | WES PLINK (GRCh38) |
-| `Bulk/Exome sequences/…BGEN format - final release/` | `ukb23157_c{1-22}_b0_v1.{bgen,bgen.bgi}` | 23157 | WES BGEN (GRCh38) |
-| `Bulk/Whole genome sequences/10/` … `19/` | `<EID>_23149_0_0.{cram,cram.crai}` | 23149 | 1KGP individual CRAMs, EID-prefix subfolders |
-| `Bulk/Whole genome sequences/20/` | `<EID>_23151_0_0.{g.vcf.gz,g.vcf.gz.tbi}` | 23151 | SGDP individual gVCFs |
-| `Bulk/Whole genome sequences/` | `ukb23370_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi}` | 23370 | Cohort pVCF (NYGC + SGDP) |
+| `Bulk/Exome sequences/…PLINK format - Final exome release/` | `ukb23158_c{1-22}_b0_v1.{bed,bim,fam}` | 23158 | WES PLINK (GRCh38) |
+| `Bulk/Exome sequences/…BGEN format - Final exome release/` | `ukb23159_c{1-22}_b0_v1.{bgen,bgen.bgi}` | 23159 | WES BGEN (GRCh38) |
+| `Bulk/Whole genome sequences/{10-29}/` | `<EID>_24051_0_0.{g.vcf.gz,g.vcf.gz.tbi}` | 24051 | Individual gVCFs (1KGP + SGDP), EID-prefix subfolders |
+| `Bulk/Whole genome sequences/` | `ukb24310_c{1-22,X}_b0_v1.{pvcf.gz,pvcf.gz.tbi}` | 24310 | Cohort pVCF (NYGC + SGDP) |
 | `Showcase/` | `participant.parquet` | various | Synthetic phenotype table, UKB column naming |
 | `metadata/` | `eid_map_1kg.tsv`, `eid_map_sgdp.tsv` | — | Sample-ID → synthetic EID maps |
 | `metadata/` | `vcf_sample_rename_1kg.txt`, `vcf_sample_rename_sgdp.txt` | — | `bcftools reheader` maps |
@@ -71,10 +70,9 @@ No liftover is performed; sources are already on the right build for each layer:
 |---|---|---|---|
 | **22418** — Array PLINK | Affymetrix Axiom array calls, ~805k SNPs, GRCh37 | 1KGP Phase 3 VCFs | `bcftools view --regions-file <Axiom manifest positions>` → `bcftools norm -m-` → `plink2 --vcf --make-bed`. If no manifest is configured, falls back to common biallelic SNPs (MAF ≥ `array_proxy_maf`, rsID present) as a proxy. FAM column 6 (batch) is set to a population-group code (EUR=1, AFR=2, EAS=3, SAS=4, AMR=5) to preserve population-stratified batch structure. cM column populated from 1KGP pedigree-based recombination maps. |
 | **22828** — Imputed BGEN v1.2 | ~92.7M variants, fractional dosages, GRCh37 | 1KGP Phase 3 VCFs | `bcftools norm -m-` → `qctool -ofiletype bgen_v1.2 -bgen-bits 8` → `bgenix -index`. Hard genotype calls used directly (info-score = 1.0 for all variants — no dosage uncertainty). `.sample` file written with EIDs in both `ID_1` and `ID_2` and `sex` from the 1KGP panel. |
-| **23149** — Individual WGS CRAMs | Per-sample 30x CRAMs, GRCh38 | 1KGP NYGC 30x CRAMs | Renamed in place: `<NYGC sample>.cram` → `<EID>_23149_0_0.cram`, placed under `Bulk/Whole genome sequences/<EID-prefix>/`. No realignment (NYGC is already GRCh38DH-compatible). |
-| **23151** — Per-sample gVCFs | Individual gVCFs, GRCh38 | NYGC + SGDP per-sample VCFs | Optional (`tbooo map wgs --gvcf`). Per-sample VCFs renamed to `<EID>_23151_0_0.g.vcf.gz`, then tabix-indexed. SGDP-only by default in the field-23151 file map. |
-| **23370** — Cohort pVCF | Multi-sample WGS pVCF, GRCh38, one file per chromosome | NYGC per-chromosome phased VCFs + merged SGDP pVCFs | `bcftools reheader --samples vcf_sample_rename_*.txt` swaps original sample IDs for EIDs, then merges NYGC and SGDP per chromosome → `ukb23370_c<chr>_b0_v1.pvcf.gz` + `.tbi`. UKB normally splits this into 151,561 blocks; TBOOO keeps one file per chromosome. |
-| **23157** — WES PLINK + BGEN | Population-level exome calls, GRCh38 | NYGC per-chr VCFs + IDT xGen exome BED | `bcftools view --regions-file <IDT exome BED>` → `bcftools norm -m-` → `bcftools reheader` (EIDs), then both `plink2 --make-bed` (PLINK output) and `qctool` + `bgenix` (BGEN output). Capture is *simulated by intersection*; true capture efficiency artefacts are not reproduced. |
+| **24051** — Per-sample gVCFs | Individual gVCFs, GRCh38 | NYGC + SGDP per-sample VCFs | Built by default. 1KGP samples are extracted from the NYGC cohort VCFs with `bcftools +split` (one pass per chromosome) and concatenated; SGDP per-sample VCFs are symlinked. Output `<EID>_24051_0_0.g.vcf.gz`, tabix-indexed. (Field 24048 CRAMs are not mirrored — the 30x CRAMs are not downloaded.) |
+| **24310** — Cohort pVCF | Multi-sample WGS pVCF, GRCh38, one file per chromosome | NYGC per-chromosome phased VCFs + merged SGDP pVCFs | `bcftools reheader --samples vcf_sample_rename_*.txt` swaps original sample IDs for EIDs, then merges NYGC and SGDP per chromosome → `ukb24310_c<chr>_b0_v1.pvcf.gz` + `.tbi`. UKB normally splits this into many blocks; TBOOO keeps one file per chromosome. |
+| **23158 / 23159** — WES PLINK + BGEN | Population-level exome calls, GRCh38 | NYGC per-chr VCFs + IDT xGen exome BED | `bcftools view --regions-file <IDT exome BED>` → `bcftools norm -m-` → `bcftools reheader` (EIDs), then both `plink2 --make-bed` (PLINK output, `ukb23158`) and `qctool` + `bgenix` (BGEN output, `ukb23159`). Capture is *simulated by intersection*; true capture efficiency artefacts are not reproduced. |
 
 ### 3.2 Phenotype table — `data/Showcase/participant.parquet`
 
@@ -85,13 +83,12 @@ Schema follows UKB naming `p<FIELD>_i<INSTANCE>_a<ARRAY>`. Populated columns:
 | `eid` | — | Synthetic 7-digit EID assigned in §2 |
 | `p31` | 31 — Sex | `gender` from the 1KGP panel file (or SGDP metadata); encoded 1=male, 2=female |
 | `p21000_i0` | 21000 — Ethnic background | Superpopulation → UKB Data-Coding 1001: EUR→1 (White), AFR→4 (Black/Black British), EAS/SAS→3 (Asian/Asian British), AMR→2 (Mixed). SGDP regions mapped analogously, with Central Asia/Siberia and Oceania → 6 (Other) |
-| `p22006` | 22006 — White British ancestry | 1 if `super_pop=EUR and pop=GBR`, else 0 |
+| `p22006` | 22006 — Genetic ethnic grouping | 1 if `super_pop=EUR and pop=GBR` (used here as the White-British-ancestry indicator), else 0 |
 | `p22020` | 22020 — Used in PCA calculation | 1 for unrelated Phase 3 samples; 0 for NYGC-added relatives and SGDP |
 | `p22000` | 22000 — Genotyping batch | Population-group batch code (same scheme as the array FAM column) |
 | `p22418` | 22418 — Array data available | 1 for all samples |
 | `p22828` | 22828 — Imputed data available | 1 for all samples |
-| `p23149` | 23149 — WGS CRAM available | 1 for 1KGP samples only (SGDP CRAMs not downloaded) |
-| `p23151` | 23151 — Individual gVCF available | 1 for SGDP samples only |
+| `p24051` | 24051 — WGS gVCF available | 1 for all samples (per-sample gVCFs built for both cohorts) |
 | `p54_i0` | 54 — Assessment centre | Synthetic centre code by population: EUR/GBR→11010 (Leeds), EUR/other→11020, AFR→11021, EAS→11022, SAS→11023, AMR/other→11024 |
 | `geuvadis_pc1`…`geuvadis_pc10` | *custom* | See §3.3 |
 

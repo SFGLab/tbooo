@@ -9,7 +9,7 @@ Populated fields (all others are null):
     p22000               genotyping array batch code
     p22418               genotype calls available (1)
     p22828               imputed genotypes available (1)
-    p23149               WGS CRAM available (1)
+    p24051               WGS gVCF available (1)
     p54_i0               assessment centre (synthetic code)
 
 Output:
@@ -123,7 +123,7 @@ def _build_1kg_rows(df: pd.DataFrame) -> pd.DataFrame:
     rows["p22000"] = df["batch"].fillna(0).astype(int)
     rows["p22418"] = 1          # array data available
     rows["p22828"] = 1          # imputed data available
-    rows["p23149"] = 1          # WGS CRAM available
+    rows["p24051"] = 1          # WGS gVCF available (DRAGEN GVCFs)
     rows["p54_i0"] = df.apply(
         lambda r: _CENTRE.get(r["pop"], _CENTRE.get(r["super_pop"], 11020)), axis=1
     )
@@ -140,7 +140,7 @@ def _build_sgdp_rows(df: pd.DataFrame) -> pd.DataFrame:
     rows["p22000"] = 0          # no batch code
     rows["p22418"] = 0          # no array data
     rows["p22828"] = 0          # no imputed data
-    rows["p23149"] = 1          # WGS CRAM available
+    rows["p24051"] = 1          # WGS gVCF available (DRAGEN GVCFs)
     rows["p54_i0"] = df["region"].map({
         "West Eurasia": 11020,
         "Africa": 11021,

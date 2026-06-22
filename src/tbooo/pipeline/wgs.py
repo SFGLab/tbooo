@@ -1,16 +1,16 @@
-"""Build UKB-mirrored WGS data (Fields 23149, 23151, 23370).
+"""Build UKB-mirrored WGS data (Fields 24051, 24310).
 
-Individual CRAMs (Field 23149):
-  - Rename/symlink 1KGP NYGC 30x CRAMs → <EID>_23149_0_0.cram
+Per-sample gVCFs (Field 24051, "Whole genome variant call files (GVCFs) (DRAGEN)") — both cohorts:
+  - 1KGP: extract per-sample VCF from NYGC 30x cohort VCFs → <EID>_24051_0_0.g.vcf.gz
+  - SGDP: symlink downloaded per-sample VCFs        → <EID>_24051_0_0.g.vcf.gz
 
-Per-sample gVCFs (Field 23151) — both cohorts:
-  - 1KGP: extract per-sample VCF from NYGC 30x cohort VCFs → <EID>_23151_0_0.g.vcf.gz
-  - SGDP: symlink downloaded per-sample VCFs        → <EID>_23151_0_0.g.vcf.gz
-
-Cohort pVCF (Field 23370) — both cohorts merged:
+Cohort pVCF (Field 24310, "DRAGEN population level WGS variants, pVCF format") — both cohorts merged:
   - 1KGP: reheader NYGC per-chromosome VCF with EIDs → raw/1kg/pvcf/nygc_c{chrom}.pvcf.gz
   - SGDP: merge per-sample VCFs by chromosome        → raw/sgdp/pvcf/sgdp_c{chrom}.pvcf.gz
-  - Combined: bcftools merge nygc + sgdp             → Bulk/Whole genome sequences/ukb23370_c{chrom}_b0_v1.pvcf.gz
+  - Combined: bcftools merge nygc + sgdp             → Bulk/Whole genome sequences/ukb24310_c{chrom}_b0_v1.pvcf.gz
+
+Individual CRAMs (Field 24048) are not mirrored: the 30x CRAMs are not downloaded
+(tens of GB per sample), so there is no source to link.
 """
 
 from __future__ import annotations
@@ -26,16 +26,8 @@ from tbooo.utils import ensure_dirs, eid_prefix_dir, has_bgzf_eof, log, run
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def rename_crams(cfg: Config) -> None:
-    """Symlink 1KGP NYGC 30x CRAMs into the UKB-mirrored individual-file structure."""
-    ensure_dirs(cfg.wgs_dir())
-    kg_map = _load_eid_map(cfg, "eid_map_1kg.tsv")
-    _rename_kg_crams(cfg, kg_map)
-    log("CRAM renaming complete.")
-
-
 def build_gvcfs(cfg: Config, chroms: list[str]) -> None:
-    """Build per-sample gVCFs (Field 23151) from both NYGC and SGDP.
+    """Build per-sample gVCFs (Field 24051) from both NYGC and SGDP.
 
     1KGP: extracts each sample from NYGC 30x cohort VCFs and concatenates chromosomes.
     SGDP: symlinks downloaded per-sample VCFs directly.
@@ -46,7 +38,7 @@ def build_gvcfs(cfg: Config, chroms: list[str]) -> None:
 
 
 def build_pvcf(cfg: Config, chroms: list[str]) -> None:
-    """Build cohort pVCF (Field 23370) by merging NYGC and SGDP per-chromosome VCFs.
+    """Build cohort pVCF (Field 24310) by merging NYGC and SGDP per-chromosome VCFs.
 
     Produces two intermediates (nygc_pvcf, sgdp_pvcf) then merges into the
     final UKB-mirrored output.  Either intermediate is used alone if the other
@@ -61,6 +53,14 @@ def build_pvcf(cfg: Config, chroms: list[str]) -> None:
 # ── gVCF internals ────────────────────────────────────────────────────────────
 
 def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
+    """Extract per-sample 1KGP gVCFs from the NYGC 30x cohort VCFs.
+
+    Uses `bcftools +split` to fan a multi-sample chromosome VCF into per-sample
+    files in ONE pass per chromosome (≈ n_chroms splits total), then concatenates
+    each sample's per-chrom pieces. The previous per-sample `view` approach scanned
+    every multi-GB chromosome VCF once per sample (n_samples × n_chroms full scans),
+    which is intractable for 3,202 samples.
+    """
     kg_map = _load_eid_map(cfg, "eid_map_1kg.tsv")
     if kg_map.empty:
         log("  WARNING: 1KGP EID map not found; skipping NYGC gVCF extraction.")
@@ -71,58 +71,88 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
         log("  No NYGC VCFs found; skipping per-sample gVCF extraction.")
         return
 
+    samples = [(int(r["eid"]), str(r["sample_id"])) for _, r in kg_map.iterrows()]
+    dest_of = {
+        eid: cfg.wgs_dir() / eid_prefix_dir(eid) / f"{eid}_24051_0_0.g.vcf.gz"
+        for eid, _ in samples
+    }
+    if all(vcf_ok(d) for d in dest_of.values()):
+        log(f"[nygc gVCF] all {len(samples)} per-sample gVCFs present & valid; skipping")
+        return
+
     ensure_dirs(cfg.tmp_dir)
-    log(f"[nygc gVCF] extracting {len(kg_map)} samples from {len(avail)} chromosome(s)…")
+    threads = max(1, cfg.wgs_nygc_threads)
 
-    for _, row in kg_map.iterrows():
-        eid = int(row["eid"])
-        sample_id = row["sample_id"]
+    # Step 1: one `+split` per chromosome → tmp/nygc_split_chr<c>/<sample_id>.vcf.gz.
+    # A `.split-complete` marker makes a killed run resumable without re-splitting
+    # a chromosome that already finished.
+    split_dirs: list[Path] = []
+    for chrom, src in avail:
+        split_dir = cfg.tmp_dir / f"nygc_split_chr{chrom}"
+        marker = split_dir / ".split-complete"
+        if not marker.exists():
+            ensure_dirs(split_dir)
+            log(f"  [nygc gVCF] splitting chr{chrom} into per-sample VCFs (threads={threads})…")
+            run([cfg.tools.bcftools, "+split", str(src),
+                 "--output-type", "z", "--threads", str(threads),
+                 "--output", str(split_dir)])
+            marker.write_text("")
+        split_dirs.append(split_dir)
 
-        dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)
-        ensure_dirs(dest_dir)
-        dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
-
+    # Step 2: assemble each sample's gVCF by concatenating its per-chrom pieces,
+    # then reheader the sample name → EID.
+    log(f"[nygc gVCF] assembling {len(samples)} per-sample gVCFs from {len(avail)} chrom(s)…")
+    for eid, sample_id in samples:
+        dest_vcf = dest_of[eid]
         if vcf_ok(dest_vcf):
             continue
-        # Drop any partial remains from an interrupted run before rebuilding.
+        ensure_dirs(dest_vcf.parent)
         remove(dest_vcf, Path(str(dest_vcf) + ".tbi"))
 
-        # Per-chromosome extraction
-        tmp_chroms: list[Path] = []
-        for chrom, src in avail:
-            tmp = cfg.tmp_dir / f"nygc_{eid}_chr{chrom}.vcf.gz"
-            run([cfg.tools.bcftools, "view", "--samples", sample_id,
-                 "--output-type", "z", "--output", str(tmp), str(src)])
-            run([cfg.tools.bcftools, "index", "--tbi", str(tmp)])
-            tmp_chroms.append(tmp)
+        pieces = [sd / f"{sample_id}.vcf.gz" for sd in split_dirs]
+        pieces = [p for p in pieces if p.exists()]
+        if not pieces:
+            continue
 
-        # Concatenate chromosomes
-        if len(tmp_chroms) == 1:
-            tmp_all = tmp_chroms[0]
-        else:
-            tmp_all = cfg.tmp_dir / f"nygc_{eid}_concat.vcf.gz"
-            run([cfg.tools.bcftools, "concat", "--output-type", "z",
-                 "--output", str(tmp_all)] + [str(t) for t in tmp_chroms])
-            run([cfg.tools.bcftools, "index", "--tbi", str(tmp_all)])
+        tmp_all = cfg.tmp_dir / f"nygc_{eid}_concat.vcf.gz"
+        run([cfg.tools.bcftools, "concat", "--output-type", "z",
+             "--threads", str(threads), "--output", str(tmp_all)]
+            + [str(p) for p in pieces])
 
-        # Reheader: original sample ID → EID
         rename_tmp = cfg.tmp_dir / f"rename_{eid}.txt"
         rename_tmp.write_text(f"{sample_id}\t{eid}\n")
         run([cfg.tools.bcftools, "reheader", "--samples", str(rename_tmp),
              "--output", str(dest_vcf), str(tmp_all)])
-        run([cfg.tools.bcftools, "index", "--tbi", str(dest_vcf)])
+        run([cfg.tools.bcftools, "index", "--tbi",
+             "--threads", str(threads), str(dest_vcf)])
 
-        for t in tmp_chroms:
-            t.unlink(missing_ok=True)
-            Path(str(t) + ".tbi").unlink(missing_ok=True)
-        if tmp_all not in tmp_chroms:
-            tmp_all.unlink(missing_ok=True)
-            Path(str(tmp_all) + ".tbi").unlink(missing_ok=True)
-        rename_tmp.unlink(missing_ok=True)
+        remove(tmp_all, rename_tmp)
 
-        log(f"  → {dest_vcf.name}")
+    # Step 3: reclaim disk only once every sample is assembled — otherwise keep the
+    # split dirs (with their markers) so a resumed run reuses them instead of
+    # re-splitting every chromosome.
+    if all(vcf_ok(d) for d in dest_of.values()):
+        for sd in split_dirs:
+            _rmtree(sd)
+        log("NYGC gVCF extraction complete.")
+    else:
+        log("NYGC gVCF extraction incomplete (some samples missing source data); "
+            "split dirs kept for resume.")
 
-    log("NYGC gVCF extraction complete.")
+
+def _rmtree(d: Path) -> None:
+    """Remove a split directory and its contents (best effort)."""
+    if not d.exists():
+        return
+    for f in d.iterdir():
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    try:
+        d.rmdir()
+    except OSError:
+        pass
 
 
 def _symlink_sgdp_gvcfs(cfg: Config) -> None:
@@ -150,8 +180,8 @@ def _symlink_sgdp_gvcfs(cfg: Config) -> None:
 
         dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)
         ensure_dirs(dest_dir)
-        dest_vcf = dest_dir / f"{eid}_23151_0_0.g.vcf.gz"
-        dest_tbi = dest_dir / f"{eid}_23151_0_0.g.vcf.gz.tbi"
+        dest_vcf = dest_dir / f"{eid}_24051_0_0.g.vcf.gz"
+        dest_tbi = dest_dir / f"{eid}_24051_0_0.g.vcf.gz.tbi"
 
         if _relink(dest_vcf, src_vcf):
             linked += 1
@@ -261,7 +291,7 @@ def _detect_chrom_prefix(cfg: Config, vcf: Path) -> str:
 
 
 def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
-    """Merge NYGC and SGDP intermediate pVCFs into the final Field 23370 output."""
+    """Merge NYGC and SGDP intermediate pVCFs into the final Field 24310 output."""
     ensure_dirs(cfg.wgs_dir())
 
     for chrom in chroms:
@@ -314,32 +344,7 @@ def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
         )
 
 
-# ── CRAM internals ────────────────────────────────────────────────────────────
-
-def _rename_kg_crams(cfg: Config, kg_map: pd.DataFrame) -> None:
-    if kg_map.empty:
-        return
-    raw = cfg.kg_raw_dir()
-    log(f"  linking 1KGP NYGC CRAMs ({len(kg_map)} samples)…")
-    for _, row in kg_map.iterrows():
-        eid = int(row["eid"])
-        sample_id = row["sample_id"]
-        crms = list(raw.glob(f"*{sample_id}*.cram"))
-        if not crms:
-            continue
-        src_cram = crms[0]
-        src_crai = Path(str(src_cram) + ".crai")
-        _symlink_cram(cfg, eid, src_cram, src_crai)
-
-
-def _symlink_cram(cfg: Config, eid: int, src_cram: Path, src_crai: Path) -> None:
-    dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)
-    ensure_dirs(dest_dir)
-    dest_cram = dest_dir / f"{eid}_23149_0_0.cram"
-    dest_crai = dest_dir / f"{eid}_23149_0_0.cram.crai"
-    _relink(dest_cram, src_cram)
-    _relink(dest_crai, src_crai)
-
+# ── symlink helper ─────────────────────────────────────────────────────────────
 
 def _relink(dest: Path, src: Path) -> bool:
     """Point `dest` at `src` via symlink; recreate it if missing or dangling.

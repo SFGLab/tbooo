@@ -16,9 +16,9 @@ TBOOO produces a directory tree and file set that structurally mirrors what a UK
 |---------------|-----------|---------------|-------------|
 | Genotyping array (PLINK) | 22418 | 1KGP Phase 3 | Phase 3 VCFs filtered to UKB array SNP positions → PLINK |
 | Imputed genotypes (BGEN) | 22828 | 1KGP Phase 3 | Phase 3 VCFs → BGEN conversion (already population-level calls) |
-| WGS individual CRAMs | 23149 | 1KGP NYGC 30x + SGDP | Individual CRAM files, renamed to UKB conventions |
-| WGS cohort pVCF | 23370–23384 | 1KGP NYGC 30x | Per-chromosome multi-sample VCFs reformatted as pVCF blocks |
-| WES cohort PLINK/BGEN | 23157 | 1KGP NYGC 30x | WGS VCFs intersected with UKB exome capture BED → PLINK/BGEN |
+| WGS per-sample gVCFs | 24051 | 1KGP NYGC 30x + SGDP | Per-sample gVCFs, renamed to UKB conventions (CRAMs, Field 24048, not mirrored) |
+| WGS cohort pVCF | 24310 | 1KGP NYGC 30x + SGDP | Per-chromosome multi-sample VCFs as population-level pVCF |
+| WES cohort PLINK/BGEN | 23158 / 23159 | 1KGP NYGC 30x | WGS VCFs intersected with UKB exome capture BED → PLINK (23158) / BGEN (23159) |
 | Phenotypic data (Parquet) | various | 1KGP + SGDP metadata | Sample panel files → synthetic UKB field columns |
 | Expression PCA (Parquet) | custom | GEUVADIS | Gene-level RPKM matrix → log-transform → PCA → top 10 PCs per sample |
 | Sample QC file | — | 1KGP + SGDP | Computed from KING + PCA on merged dataset |
@@ -91,20 +91,20 @@ data/
 │   │   │   ...
 │   │   └── ukb22828_c22_b0_v3.sample
 │   ├── Exome sequences/
-│   │   └── Population level exome OQFE variants, PLINK format - 500k release/
-│   │       ├── ukb23157_c1_b0_v1.bed
-│   │       ├── ukb23157_c1_b0_v1.bim
-│   │       ├── ukb23157_c1_b0_v1.fam
+│   │   └── Population level exome OQFE variants, PLINK format - Final exome release/
+│   │       ├── ukb23158_c1_b0_v1.bed
+│   │       ├── ukb23158_c1_b0_v1.bim
+│   │       ├── ukb23158_c1_b0_v1.fam
 │   │       │   ...
-│   │       └── ukb23157_c22_b0_v1.fam
+│   │       └── ukb23158_c22_b0_v1.fam
 │   └── Whole genome sequences/
 │       ├── 10/
-│       │   ├── 1000001_23149_0_0.cram
-│       │   ├── 1000001_23149_0_0.cram.crai
-│       │   ├── 1000002_23149_0_0.cram
+│       │   ├── 1000001_24051_0_0.g.vcf.gz
+│       │   ├── 1000001_24051_0_0.g.vcf.gz.tbi
+│       │   ├── 1000002_24051_0_0.g.vcf.gz
 │       │   │   ...
 │       └── 20/
-│           ├── 2000001_23149_0_0.cram
+│           ├── 2000001_24051_0_0.g.vcf.gz
 │           │   ...
 ├── Showcase/
 │   └── participant.parquet        # synthetic phenotype table
@@ -277,63 +277,50 @@ MAF is computed from the 2,504-sample genotype matrix using PLINK2 `--freq`.
 
 ---
 
-## 6. Whole Genome Sequencing — Individual CRAMs (UKB Field 23149)
+## 6. Whole Genome Sequencing — Per-sample gVCFs (UKB Field 24051)
+
+> Note: individual CRAMs (UKB Field 24048, "Whole genome CRAM files (DRAGEN)") are **not** mirrored — the 30x CRAMs are tens of GB per sample and are not downloaded, so there is no source to link.
 
 ### Strategy
 
-UKB provides individual CRAM files for each participant at ~30x depth. The public equivalents are the existing per-sample CRAM files from 1KGP NYGC 30x and SGDP. They are renamed to the UKB individual-level file naming convention and placed in EID-prefix subfolders.
+UKB Field 24051 ("Whole genome variant call files (GVCFs) (DRAGEN)") holds a per-participant gVCF for each sample. TBOOO builds the equivalent per-sample gVCFs from the public WGS sources and places them in EID-prefix subfolders.
 
 ### Sources
 
-| Source | Samples | Reference | Coverage |
-|--------|---------|-----------|---------|
-| 1KGP NYGC 30x | 3,202 | GRCh38 | 30x |
-| SGDP Section A | 279 | GRCh38DH | ≥ 30x |
+| Source | Samples | Reference | gVCF source |
+|--------|---------|-----------|-------------|
+| 1KGP NYGC 30x | 3,202 | GRCh38 | extracted per-sample from the NYGC cohort VCFs |
+| SGDP Section A | 279 | GRCh38DH | downloaded per-sample VCFs, symlinked |
 
-### File renaming
+### Build
 
-UKB individual CRAM naming:
+UKB individual file naming: `<EID>_<FIELD-ID>_<INSTANCE-ID>_<ARRAY-ID>.g.vcf.gz`. For Field 24051, instance 0, array 0:
 ```
-<EID>_<FIELD-ID>_<INSTANCE-ID>_<ARRAY-ID>.cram
-```
-
-For the WGS CRAM field (23149), instance 0, array 0:
-```
-<EID>_23149_0_0.cram
-<EID>_23149_0_0.cram.crai
+<EID>_24051_0_0.g.vcf.gz
+<EID>_24051_0_0.g.vcf.gz.tbi
 ```
 
-**1KGP NYGC 30x rename example:**
+**1KGP** — rather than `bcftools view` per sample (intractable at 3,202 × 23 chromosomes), each chromosome's NYGC cohort VCF is split once with `bcftools +split` into per-sample files, which are then concatenated across chromosomes and reheadered to the EID:
 ```
-# Source:
-NA12878.alt_bwamem_GRCh38DH.20150826.CEU.simons.cram   (hypothetical NYGC naming)
-
-# Target (EID 1000001 assigned to NA12878):
-data/Bulk/Whole genome sequences/10/1000001_23149_0_0.cram
-data/Bulk/Whole genome sequences/10/1000001_23149_0_0.cram.crai
+data/Bulk/Whole genome sequences/10/1000001_24051_0_0.g.vcf.gz
 ```
 
-**SGDP rename example:**
+**SGDP** — the downloaded per-sample VCFs are symlinked directly:
 ```
-# Source:
-SAMEA3302732.alt_bwamem_GRCh38DH.20200922.Greek.simons.cram
-
-# Target (EID 2000001 assigned to SAMEA3302732):
-data/Bulk/Whole genome sequences/20/2000001_23149_0_0.cram
-data/Bulk/Whole genome sequences/20/2000001_23149_0_0.cram.crai
+data/Bulk/Whole genome sequences/20/2000001_24051_0_0.g.vcf.gz
 ```
 
 ### Reference genome note
 
-UKB WGS CRAMs use GRCh38. Both 1KGP NYGC 30x and SGDP CRAMs are also aligned to GRCh38 (or GRCh38DH, which is compatible). No re-alignment is needed.
+UKB WGS gVCFs use GRCh38. Both 1KGP NYGC 30x and SGDP are aligned to GRCh38 (or compatible GRCh38DH). No re-alignment is needed.
 
 ---
 
-## 7. Whole Genome Sequencing — Cohort pVCF (UKB Fields 23370–23384)
+## 7. Whole Genome Sequencing — Cohort pVCF (UKB Field 24310)
 
 ### Strategy
 
-UKB WGS cohort data is released as multi-sample pVCF files split into 151,561 genomic blocks. TBOOO produces per-chromosome multi-sample VCFs from 1KGP NYGC 30x data (which are already per-chromosome phased VCFs) as a coarser-grained equivalent.
+UKB WGS cohort data (Field 24310, "DRAGEN population level WGS variants, pVCF format [500k release]") is released as multi-sample pVCF files split into many genomic blocks. TBOOO produces per-chromosome multi-sample VCFs from 1KGP NYGC 30x + SGDP data as a coarser-grained equivalent.
 
 ### Source
 
@@ -353,7 +340,7 @@ The VCF sample headers use original 1KGP sample IDs (e.g., `NA12878`). These mus
 bcftools reheader \
   --samples data/metadata/vcf_sample_rename_1kg.txt \
   CCDG_14151_B01_GRM_WGS_2020-08-05_chr1.filtered.shapeit2-duohmm-phased.vcf.gz \
-  -o data/Bulk/Whole\ genome\ sequences/ukb23370_c1_b0_v1.pvcf.gz
+  -o data/Bulk/Whole\ genome\ sequences/ukb24310_c1_b0_v1.pvcf.gz
 ```
 
 The rename file format (one line per sample):
@@ -365,18 +352,18 @@ NA12891 1000002
 
 ### Output naming
 
-UKB uses field 23370–23384 for the 500k WGS pVCF release. TBOOO maps to a single field:
+UKB Field 24310 holds the DRAGEN population-level WGS pVCF (500k release). TBOOO maps to it directly:
 
 ```
-ukb23370_c<chr>_b0_v1.pvcf.gz
-ukb23370_c<chr>_b0_v1.pvcf.gz.tbi
+ukb24310_c<chr>_b0_v1.pvcf.gz
+ukb24310_c<chr>_b0_v1.pvcf.gz.tbi
 ```
 
 One file per chromosome (chr1–22, chrX). Block-level splitting (matching UKB's 151,561 blocks) is optional and only needed if downstream tools expect it.
 
 ---
 
-## 8. Whole Exome Sequencing Simulation (UKB Field 23157)
+## 8. Whole Exome Sequencing Simulation (UKB Fields 23158 PLINK / 23159 BGEN)
 
 ### Strategy
 
@@ -417,7 +404,7 @@ bcftools view \
 plink2 \
   --vcf tmp_chr1_exome.vcf.gz \
   --make-bed \
-  --out data/Bulk/Exome\ sequences/Population\ level\ exome\ OQFE\ variants,\ PLINK\ format\ -\ 500k\ release/ukb23157_c1_b0_v1
+  --out data/Bulk/Exome\ sequences/Population\ level\ exome\ OQFE\ variants,\ PLINK\ format\ -\ Final\ exome\ release/ukb23158_c1_b0_v1
 ```
 
 ### BGEN conversion
@@ -425,10 +412,10 @@ plink2 \
 ```bash
 qctool \
   -g tmp_chr1_exome.vcf.gz -filetype vcf \
-  -og data/Bulk/Exome\ sequences/ukb23157_c1_b0_v1.bgen \
+  -og data/Bulk/Exome\ sequences/ukb23159_c1_b0_v1.bgen \
   -ofiletype bgen_v1.2 \
   -bgen-bits 8
-bgenix -g data/Bulk/Exome\ sequences/ukb23157_c1_b0_v1.bgen -index
+bgenix -g data/Bulk/Exome\ sequences/ukb23159_c1_b0_v1.bgen -index
 ```
 
 ### Limitation
@@ -465,7 +452,7 @@ The following UKB fields can be directly or approximately populated:
 | `p22000` | 22000 | Genotyping array batch | Synthetic batch code (§4) | See FAM file batch scheme |
 | `p22418` | 22418 | Genotype calls available | 1 for all samples | Binary flag |
 | `p22828` | 22828 | Imputed genotypes available | 1 for all samples | Binary flag |
-| `p23149` | 23149 | WGS CRAM available | 1 for all samples with CRAM | Binary flag |
+| `p24051` | 24051 | WGS gVCF available | 1 for all samples | Binary flag |
 | `p54_i0` | 54 | UK Biobank assessment centre | Population code (see §9.2) | Approximate; instance 0 |
 | `geuvadis_pc1` – `geuvadis_pc10` | custom | Gene expression PC scores | GEUVADIS RPKM PCA (see §10) | null for non-GEUVADIS samples |
 

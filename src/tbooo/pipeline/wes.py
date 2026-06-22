@@ -1,4 +1,4 @@
-"""Build UKB-mirrored WES files (Field 23157) by intersecting WGS VCFs with exome BED.
+"""Build UKB-mirrored WES files (Fields 23158 PLINK / 23159 BGEN) by intersecting WGS VCFs with exome BED.
 
 For each chromosome:
   1. Intersect NYGC 30x VCF with IDT xGen exome capture BED (GRCh38)
@@ -8,8 +8,8 @@ For each chromosome:
   5. Convert to BGEN v1.2
 
 Outputs:
-    data/Bulk/Exome sequences/.../ukb23157_c{chrom}_b0_v1.{bed,bim,fam}
-    data/Bulk/Exome sequences/.../ukb23157_c{chrom}_b0_v1.{bgen,bgen.bgi,sample}
+    data/Bulk/Exome sequences/.../ukb23158_c{chrom}_b0_v1.{bed,bim,fam}
+    data/Bulk/Exome sequences/.../ukb23159_c{chrom}_b0_v1.{bgen,bgen.bgi,sample}
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def run_wes_pipeline(cfg: Config, chroms: list[str]) -> None:
 
     rename_file = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
     eid_map = _load_eid_map(cfg)
-    sample_path = cfg.wes_bgen_dir() / "ukb23157_samples.sample"
+    sample_path = cfg.wes_bgen_dir() / "ukb23159_samples.sample"
     _write_sample_file(eid_map, sample_path)
 
     for chrom in chroms:

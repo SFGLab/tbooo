@@ -96,15 +96,17 @@ class Config:
         return self.bulk_dir("Whole genome sequences")
 
     def wes_dir(self) -> Path:
+        # UKB Field 23158 (exome OQFE variants, PLINK format, final release).
         return self.bulk_dir(
             "Exome sequences",
-            "Population level exome OQFE variants, PLINK format - 500k release",
+            "Population level exome OQFE variants, PLINK format - Final exome release",
         )
 
     def wes_bgen_dir(self) -> Path:
+        # UKB Field 23159 (exome OQFE variants, BGEN format, final release).
         return self.bulk_dir(
             "Exome sequences",
-            "Population level exome OQFE variants, BGEN format - final release",
+            "Population level exome OQFE variants, BGEN format - Final exome release",
         )
 
     def showcase_dir(self) -> Path:
@@ -154,10 +156,13 @@ class Config:
         return self.imputed_dir() / f"ukb22828_c{chrom}_b0_v3"
 
     def wes_stem(self, chrom: str) -> Path:
-        return self.wes_dir() / f"ukb23157_c{chrom}_b0_v1"
+        # UKB Field 23158 — exome OQFE variants, PLINK format (final release).
+        return self.wes_dir() / f"ukb23158_c{chrom}_b0_v1"
 
     def wes_bgen_stem(self, chrom: str) -> Path:
-        return self.wes_bgen_dir() / f"ukb23157_c{chrom}_b0_v1"
+        # UKB Field 23159 — exome OQFE variants, BGEN format (final release).
+        return self.wes_bgen_dir() / f"ukb23159_c{chrom}_b0_v1"
 
     def wgs_pvcf(self, chrom: str) -> Path:
-        return self.wgs_dir() / f"ukb23370_c{chrom}_b0_v1.pvcf.gz"
+        # UKB Field 24310 — DRAGEN population-level WGS variants, pVCF format [500k].
+        return self.wgs_dir() / f"ukb24310_c{chrom}_b0_v1.pvcf.gz"

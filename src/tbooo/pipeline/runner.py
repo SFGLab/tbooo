@@ -90,8 +90,10 @@ def run(
 
     # ── WGS ────────────────────────────────────────────────────────────────────
     if target in (None, "wgs"):
-        from tbooo.pipeline.wgs import rename_crams, build_pvcf
-        step("map wgs crams", rename_crams, cfg)
+        from tbooo.pipeline.wgs import build_gvcfs, build_pvcf
+        # gVCFs (Field 24051) build all chromosomes per sample in one pass, so this
+        # is a single step rather than per-chrom parallel.
+        step("map wgs gvcf", build_gvcfs, cfg, chrom_list)
         parallel_chroms("map wgs pvcf", build_pvcf, chrom_list)
 
     # ── GEUVADIS expression PCA ────────────────────────────────────────────────

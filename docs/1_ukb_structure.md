@@ -59,8 +59,8 @@ These files are grouped into subfolders named by the first two digits of the EID
 
 **Example path:**
 ```
-/Bulk/Whole genome sequences/10/1012345_23149_0_0.cram
-/Bulk/Whole genome sequences/10/1012345_23149_0_0.cram.crai
+/Bulk/Whole genome sequences/10/1012345_24048_0_0.cram
+/Bulk/Whole genome sequences/10/1012345_24048_0_0.cram.crai
 ```
 
 ---
@@ -157,10 +157,11 @@ All multi-allelic variants are split into bi-allelic records before storage.
 
 | Field | Contents |
 |-------|----------|
-| `23157` | Latest WES release (v11+) |
-| `23148` | v7 and later releases |
-| `23146` | Previous versions |
-| `23141`–`23145` | WES metadata and auxiliary data |
+| `23157` | Population level exome OQFE variants, pVCF format — Final exome release |
+| `23158` / `23159` | Population level exome OQFE variants, PLINK / BGEN format — Final exome release |
+| `23141` | Exome OQFE variant call files (VCFs) |
+| `23145` / `23146` | Population level exome OQFE variants, PLINK / pVCF format — interim 300k release |
+| `23148` / `23149` | Population level exome OQFE variants, pVCF / PLINK format — interim 450k release |
 
 ### Location
 ```
@@ -171,7 +172,7 @@ All multi-allelic variants are split into bi-allelic records before storage.
 
 Example sub-paths:
 ```
-/Bulk/Exome sequences/Population level exome OQFE variants, PLINK format - 500k release/
+/Bulk/Exome sequences/Population level exome OQFE variants, PLINK format - Final exome release/
 /Bulk/Exome sequences/Population level exome OQFE variants, BGEN format - final release/
 /Bulk/Exome sequences/Population level exome OQFE variants, VCF format/
 /Bulk/Exome sequences_Alternative exome processing/Exome variant call files (gnomAD) (VCFs)/helper_files/
@@ -208,10 +209,16 @@ Example sub-paths:
 
 ### Field IDs
 
-| Field Range | Contents |
-|-------------|----------|
-| `23149`–`23151` | Individual CRAM files and initial WGS VCF data |
-| `23370`–`23384` | 500k WGS expanded releases |
+| Field | Contents |
+|-------|----------|
+| `23193` | Whole genome CRAM files and indices [200k release] |
+| `24048` | Whole genome CRAM files (DRAGEN) [500k release] |
+| `24051` | Whole genome variant call files (GVCFs) (DRAGEN) [500k release] |
+| `24053` | Whole genome variant call files (VCFs) (DRAGEN) [500k release] |
+| `24310` / `24311` | DRAGEN population-level WGS variants, pVCF format (plain / ML-corrected) [500k release] |
+| `23370` / `23374` | GATK / GraphTyper joint-called WGS VCFs (earlier releases) |
+
+> Note: fields `23149`–`23151` are **exome** OQFE fields (interim releases), *not* WGS — a common confusion.
 
 ### Locations
 ```
@@ -355,7 +362,7 @@ PCA-derived principal components are available as separate fields in the phenoty
 |-------|-------------|
 | `22418` | Genotype calls (PLINK format) |
 | `22000` | Array type and batch designation per participant |
-| `22006` | Genetic ancestry — White British flag |
+| `22006` | Genetic ethnic grouping (used as the White-British indicator) |
 | `22020` | Used in PCA calculation flag |
 
 ### Imputed Genotypes
@@ -365,21 +372,24 @@ PCA-derived principal components are available as separate fields in the phenoty
 | `22828` | Imputed genotypes v3 (BGEN) — recommended |
 | `22829` | Related imputation field |
 
-### WES
+### WES (exome OQFE, GRCh38)
 
 | Field | Description |
 |-------|-------------|
-| `23157` | WES data — latest release (v11+) |
-| `23148` | WES data — v7 and later |
-| `23146` | WES data — previous versions |
-| `23141`–`23145` | WES metadata |
+| `23157` | Population level exome OQFE variants, pVCF format — Final exome release |
+| `23158` / `23159` | Population level exome OQFE variants, PLINK / BGEN format — Final exome release |
+| `23141` | Exome OQFE variant call files (VCFs) |
+| `23145` / `23146` / `23148` / `23149` | Population level exome OQFE variants — interim 300k/450k releases (PLINK/pVCF) |
 
 ### WGS
 
 | Field | Description |
 |-------|-------------|
-| `23149`–`23151` | WGS CRAM files and initial VCF data |
-| `23370`–`23384` | 500k WGS expanded releases |
+| `23193` / `24048` | Whole genome CRAM files ([200k] / DRAGEN [500k]) |
+| `24051` | Whole genome variant call files (GVCFs) (DRAGEN) [500k] |
+| `24053` | Whole genome variant call files (VCFs) (DRAGEN) [500k] |
+| `24310` / `24311` | DRAGEN population-level WGS pVCF (plain / ML-corrected) [500k] |
+| `23370` / `23374` | GATK / GraphTyper joint-called WGS VCFs (earlier releases) |
 
 ### Data Category Codes
 
