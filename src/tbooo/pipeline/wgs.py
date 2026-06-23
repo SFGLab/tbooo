@@ -83,21 +83,34 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
     ensure_dirs(cfg.tmp_dir)
     threads = max(1, cfg.wgs_nygc_threads)
 
-    # Step 1: one `+split` per chromosome → tmp/nygc_split_chr<c>/<sample_id>.vcf.gz.
+    # `bcftools +split` holds one output file open per sample at once, so a
+    # 3,202-sample cohort exceeds the open-file limit. Raise the soft FD limit
+    # toward the hard cap, then split in sample batches sized to stay under it.
+    sample_ids = [sid for _, sid in samples]
+    batch_size = _fd_batch_size(len(sample_ids))
+
+    # Step 1: `+split` each chromosome → tmp/nygc_split_chr<c>/<sample_id>.vcf.gz.
     # A `.split-complete` marker makes a killed run resumable without re-splitting
-    # a chromosome that already finished.
+    # a chromosome that already finished. (+split is a plugin with no --threads.)
     split_dirs: list[Path] = []
     for chrom, src in avail:
         split_dir = cfg.tmp_dir / f"nygc_split_chr{chrom}"
         marker = split_dir / ".split-complete"
         if not marker.exists():
             ensure_dirs(split_dir)
-            log(f"  [nygc gVCF] splitting chr{chrom} into per-sample VCFs…")
-            # `bcftools +split` is a plugin with no --threads option; only the
-            # core concat/index calls below are threaded.
-            run([cfg.tools.bcftools, "+split", str(src),
-                 "--output-type", "z",
-                 "--output", str(split_dir)])
+            n_batches = (len(sample_ids) + batch_size - 1) // batch_size
+            log(f"  [nygc gVCF] splitting chr{chrom} into per-sample VCFs "
+                f"({len(sample_ids)} samples, {n_batches} batch(es))…")
+            for i in range(0, len(sample_ids), batch_size):
+                cmd = [cfg.tools.bcftools, "+split", str(src),
+                       "--output-type", "z", "--output", str(split_dir)]
+                if n_batches > 1:
+                    sfile = cfg.tmp_dir / f"split_samples_chr{chrom}_{i}.txt"
+                    sfile.write_text("\n".join(sample_ids[i:i + batch_size]) + "\n")
+                    run(cmd + ["--samples-file", str(sfile)])
+                    sfile.unlink(missing_ok=True)
+                else:
+                    run(cmd)
             marker.write_text("")
         split_dirs.append(split_dir)
 
@@ -140,6 +153,31 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
     else:
         log("NYGC gVCF extraction incomplete (some samples missing source data); "
             "split dirs kept for resume.")
+
+
+def _fd_batch_size(n_samples: int) -> int:
+    """Largest sample batch that keeps `bcftools +split` under the open-file limit.
+
+    +split opens one output file per sample simultaneously. Raise the soft
+    RLIMIT_NOFILE toward the hard cap, then leave a margin for stdio/htslib FDs.
+    Returns a batch size in [1, n_samples]; n_samples means a single pass suffices.
+    """
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        need = n_samples + 256
+        target = need if hard == resource.RLIM_INFINITY else min(hard, need)
+        if soft != resource.RLIM_INFINITY and soft < target:
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+                soft = target
+            except (ValueError, OSError):
+                pass
+        if soft == resource.RLIM_INFINITY:
+            return n_samples
+        return max(1, min(n_samples, soft - 128))
+    except Exception:
+        return max(1, min(n_samples, 256))
 
 
 def _rmtree(d: Path) -> None:
