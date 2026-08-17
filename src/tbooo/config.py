@@ -124,6 +124,12 @@ class Config:
     def geuvadis_raw_dir(self) -> Path:
         return self.data_dir / "raw" / "geuvadis"
 
+    def mage_raw_dir(self) -> Path:
+        return self.data_dir / "raw" / "mage"
+
+    def gtex_raw_dir(self) -> Path:
+        return self.data_dir / "raw" / "gtex"
+
     def sgdp_vcf_dir(self) -> Path:
         return self.sgdp_raw_dir() / "vcf"
 

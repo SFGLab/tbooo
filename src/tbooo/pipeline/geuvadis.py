@@ -1,7 +1,9 @@
 """Compute gene expression PCA from GEUVADIS and merge scores into participant.parquet.
 
 Steps:
-    1. Read GD462 RPKM matrix (genes × samples).
+    1. Read GD660 raw RPKM matrix (genes × runs), averaging technical replicates
+       per individual. Raw rather than PEER-residualized: PEER factors absorb
+       population structure, which is exactly the signal downstream work needs.
     2. Filter genes: median RPKM >= MIN_MEDIAN_RPKM across all samples.
     3. Log2-transform: log2(max(RPKM, 0) + 0.1).
     4. Select top N_HVG genes by post-log2 variance.
@@ -31,7 +33,7 @@ from tbooo.utils import ensure_dirs, log
 N_PCS = 20
 N_HVG = 2000        # top highly-variable genes selected after log2 transform
 _MIN_MEDIAN_RPKM = 0.1
-_RPKM_FILENAME = "GD462.GeneQuantRPKM.50FN.samplename.resk10.txt.gz"
+_RPKM_FILENAME = "GD660.GeneQuantRPKM.txt.gz"
 # 1KGP sample IDs: 2 uppercase letters + 5 digits (HG00096, NA12878, …)
 _SAMPLE_ID_LEN = 7
 
@@ -108,18 +110,26 @@ def build_expression_pcs(cfg: Config) -> None:
 
 
 def _load_rpkm(path) -> pd.DataFrame:
-    """Return DataFrame with genes as rows, 1KGP sample IDs as columns."""
+    """Return DataFrame with genes as rows, 1KGP sample IDs as columns.
+
+    GD660 column headers are run identifiers (`HG00096.1.M_111124_6`) covering
+    462 individuals across 660 runs. Runs are averaged per individual so the
+    result is one column per person.
+    """
     df = pd.read_csv(path, sep="\t", compression="gzip", index_col=0)
 
-    # Drop metadata columns (Chr, Start, End, Strand, Length, …).
-    # Keep only columns whose names look like 1KGP sample IDs.
-    sample_cols = [c for c in df.columns if _is_sample_id(c)]
-    if not sample_cols:
+    # Drop metadata columns (Gene_Symbol, Chr, Coord, …) by keeping only columns
+    # whose first dot-separated field looks like a 1KGP sample ID.
+    run_cols = [c for c in df.columns if _is_sample_id(c.split(".")[0])]
+    if not run_cols:
         raise ValueError(
-            f"No 1KGP-style sample ID columns found in {path}. "
-            "Expected column names like 'HG00096' or 'NA12878'."
+            f"No 1KGP-style sample columns found in {path}. "
+            "Expected run identifiers like 'HG00096.1.M_111124_6'."
         )
-    return df[sample_cols]
+    sample_ids = [c.split(".")[0] for c in run_cols]
+    # Transpose-groupby-transpose rather than groupby(axis=1), which pandas
+    # deprecated; the two are equivalent.
+    return df[run_cols].T.groupby(sample_ids).mean().T
 
 
 def _is_sample_id(col: str) -> bool:

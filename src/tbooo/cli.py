@@ -4,6 +4,8 @@ Usage:
     tbooo download 1kg        Download 1000 Genomes Phase 3 + NYGC 30x data
     tbooo download sgdp       Download SGDP CRAM files
     tbooo download geuvadis   Download GEUVADIS GD462 RPKM expression matrix
+    tbooo download mage       Download MAGE expression + genotype PCs (731 individuals)
+    tbooo download gtex       Download GTEx per-tissue TPM + eQTL covariates
     tbooo download reference  Download reference files (exome BED, genetic maps)
 
     tbooo map eids            Assign synthetic EIDs to all samples
@@ -12,6 +14,8 @@ Usage:
     tbooo map wgs             Build UKB-mirrored WGS gVCFs + pVCF (Field 24051/24310)
     tbooo map wes             Build UKB-mirrored WES PLINK/BGEN files (Field 23158/23159)
     tbooo map geuvadis        Compute expression PCA and add geuvadis_pc* to participant.parquet
+    tbooo map mage            Compute MAGE expression PCA and add mage_pc* columns
+    tbooo map gtex            Assign GTEx EIDs (3,000,000+) and append gtex_pc* rows
     tbooo map phenotypes      Build synthetic phenotype Parquet table
     tbooo map qc              Build sample QC and relatedness files
     tbooo map eda             EDA plots: sex/region demographics + RNA PCA
@@ -99,6 +103,22 @@ def download_geuvadis(config):
     download_expression(_cfg(config))
 
 
+@download.command("mage")
+@CONFIG_OPTION
+def download_mage_cmd(config):
+    """Download MAGE expression, metadata and genotype PCs (selective, ~165 MB)."""
+    from tbooo.download.mage import download_mage
+    download_mage(_cfg(config))
+
+
+@download.command("gtex")
+@CONFIG_OPTION
+def download_gtex_cmd(config):
+    """Download GTEx per-tissue TPM, eQTL covariates and annotations."""
+    from tbooo.download.gtex import download_gtex
+    download_gtex(_cfg(config))
+
+
 @download.command("reference")
 @CONFIG_OPTION
 def download_reference(config):
@@ -181,6 +201,22 @@ def map_geuvadis(config):
     build_expression_pcs(_cfg(config))
 
 
+@map.command("mage")
+@CONFIG_OPTION
+def map_mage(config):
+    """Compute MAGE expression PCA and merge mage_pc* into participant.parquet."""
+    from tbooo.pipeline.mage import build_expression_pcs
+    build_expression_pcs(_cfg(config))
+
+
+@map.command("gtex")
+@CONFIG_OPTION
+def map_gtex(config):
+    """Assign GTEx donors EIDs and append gtex_pc* rows to participant.parquet."""
+    from tbooo.pipeline.gtex import build_expression_pcs
+    build_expression_pcs(_cfg(config))
+
+
 @map.command("phenotypes")
 @CONFIG_OPTION
 def map_phenotypes(config):
@@ -217,7 +253,7 @@ def map_eda(config):
               help="Comma-separated chromosomes to process (default: all)")
 @click.option("--target", default=None,
               type=click.Choice(["array", "imputed", "wes", "wgs",
-                                 "geuvadis", "phenotypes", "qc", "eda"]),
+                                 "geuvadis", "mage", "gtex", "phenotypes", "qc", "eda"]),
               help="Run only this stage (assumes prerequisites already exist)")
 @click.option("--no-download", is_flag=True,
               help="Skip all download steps")
