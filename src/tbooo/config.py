@@ -67,6 +67,9 @@ class Config:
     wgs_sgdp_merge_threads: int = 8   # SGDP ~280-way merge (compute heavy)
     wgs_final_merge_threads: int = 4  # final NYGC + SGDP merge per chromosome
 
+    # Path to the cohort registry (gitignored). Empty = restricted stages disabled.
+    cohorts_registry: str = ""
+
     @classmethod
     def load(cls, path: Path | str = "config.yaml") -> "Config":
         with open(path) as f:
@@ -172,3 +175,14 @@ class Config:
     def wgs_pvcf(self, chrom: str) -> Path:
         # UKB Field 24310 — DRAGEN population-level WGS variants, pVCF format [500k].
         return self.wgs_dir() / f"ukb24310_c{chrom}_b0_v1.pvcf.gz"
+
+    def raw_reads_dir(self) -> Path:
+        # No UKB counterpart — UKB does not release FASTQ.
+        return self.bulk_dir("Raw sequencing reads")
+
+    def sv_dir(self) -> Path:
+        # No UKB counterpart — UKB has no per-participant SV call field.
+        return self.bulk_dir("Structural variants (ConsensuSV)")
+
+    def slurm_dir(self) -> Path:
+        return self.data_dir / "slurm"

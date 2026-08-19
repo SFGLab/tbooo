@@ -222,3 +222,13 @@ __marimo__/
 
 # Data
 data/
+
+# Restricted cohorts — private, externally-held data.
+# These files reference real filesystem paths, patient-derived sample IDs and
+# account details, and must never be committed to a public repo.
+docs/superpowers/specs/*restricted*.md
+docs/superpowers/plans/*restricted*.md
+config.restricted.yaml
+src/tbooo/cohorts/cohorts.yaml
+cohorts.yaml
+restricted/

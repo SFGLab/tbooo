@@ -228,6 +228,26 @@ tbooo run --target qc
 tbooo run --jobs 8 --chroms 1,2,3 --no-download
 ```
 
+### Optional - ingest externally-held cohorts
+
+A separate command group, `tbooo restricted`, ingests cohorts that cannot be
+redistributed (data held under access control on an institutional cluster) into a
+second, separately access-controlled TBOOO instance. Sources are symlinked, never
+copied or modified, and all cohort-specific detail lives in a private, gitignored
+`cohorts.yaml` (see `cohorts.example.yaml` for the schema).
+
+```bash
+tbooo restricted discover      # 1. enumerate samples (read-only)
+tbooo restricted eids          # 2. assign EIDs, write rename files
+tbooo restricted link          # 3. symlink tree + provenance manifests
+tbooo restricted sv            # 4. emit a SLURM script (runs nothing itself)
+tbooo restricted phenotypes    # 5. participant.parquet
+```
+
+The stages are ordered, and re-running them after the sample set changes
+renumbers EIDs and prunes the links left behind. See
+[docs/5_restricted_cohorts.md](docs/5_restricted_cohorts.md) before using it.
+
 ---
 
 ## Phenotype table
@@ -259,6 +279,7 @@ Clinical fields (diagnoses, medications, hospital records, imaging) are present 
 | [docs/1_ukb_structure.md](docs/1_ukb_structure.md) | UK Biobank data structure on DNAnexus RAP - file naming, field IDs, formats, reference genomes |
 | [docs/2_data_sources.md](docs/2_data_sources.md) | 1KGP and SGDP data - phases, sample counts, VCF paths, access methods |
 | [docs/3_data_mapping.md](docs/3_data_mapping.md) | Mapping specification - how each source file becomes each UKB-mirrored output |
+| [docs/5_restricted_cohorts.md](docs/5_restricted_cohorts.md) | Restricted cohort ingestion - the `tbooo restricted` stages, the private registry, EID renumbering |
 
 ---
 

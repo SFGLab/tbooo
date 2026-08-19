@@ -1,0 +1,44 @@
+# cohorts.example.yaml — TEMPLATE ONLY.
+#
+# Copy to cohorts.yaml and fill in real values. cohorts.yaml is gitignored:
+# it holds real filesystem paths and must never be committed.
+#
+# Every value below is fictional.
+
+cohorts:
+
+  # A cohort of aligned BAMs in one flat directory.
+  example_cases:
+    eid_base: 6000000               # must not collide with 1/2/3,000,000
+    raw_root: /path/to/example_cases
+    discovery: flat_bam             # sample_id = BAM basename
+    modalities: [bam]
+    icd10: A00.0                    # diagnosis code for every sample in this cohort
+
+  # A cohort of per-sample directories of paired FASTQ, with variant calls.
+  example_controls:
+    eid_base: 7000000
+    raw_root: /path/to/example_controls/fastq
+    vcf_root: /path/to/example_controls/calls
+    discovery: sample_dirs          # sample_id = subdirectory name
+    modalities: [fastq, sv_vcf]
+    vcf_pattern: "calls__{sample}.vcf"
+    exclude:                        # entries in raw_root that are not samples
+      - manifest.csv
+      - checksums.txt
+    icd10: null                     # null = no diagnosis (control group)
+    # First matching pattern wins; applied to the flowcell token.
+    platform_patterns:
+      - ["^AA", "example_platform_one"]
+      - ["^BB", "example_platform_two"]
+    # Must define a named group 'flowcell'. Applied to the run token.
+    flowcell_regex: "^(?P<flowcell>[A-Z0-9]+)_L[0-9]+$"
+    # Optional. Overrides the default FASTQ naming convention, which is
+    # <run>_1.fq.gz / <run>_2.fq.gz (.fastq.gz equally). A regex matched against
+    # the whole filename; it must define named groups 'run' and 'mate'. The
+    # sample-ID prefix, if any, is stripped from the captured run token. Omit the
+    # key to keep the default. For Illumina bcl2fastq names such as
+    # <sample>_S1_L001_R1_001.fastq.gz, use:
+    #   fastq_pattern: '^(?P<run>.+?)_R(?P<mate>[12])_001\.fastq\.gz$'
+    # Optional. Named groups 'stem' and 'member' derive a PUTATIVE pedigree.
+    pedigree_regex: "^(?P<stem>.+?)(?P<member>[a-z])$"

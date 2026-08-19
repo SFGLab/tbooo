@@ -20,6 +20,12 @@ Usage:
     tbooo map qc              Build sample QC and relatedness files
     tbooo map eda             EDA plots: sex/region demographics + RNA PCA
 
+    tbooo restricted discover    Enumerate samples in each registered cohort
+    tbooo restricted eids        Assign EIDs and write rename files
+    tbooo restricted link        Build the symlink tree + provenance manifests
+    tbooo restricted sv          Emit the SLURM script for the SV layer
+    tbooo restricted phenotypes  Build participant.parquet (always all cohorts)
+
     tbooo run                 Run the full pipeline
 """
 
@@ -239,6 +245,150 @@ def map_eda(config):
     """EDA plots: sex/region demographics + GEUVADIS RNA PCA."""
     from tbooo.pipeline.eda import run_eda
     run_eda(_cfg(config))
+
+
+# ── restricted ────────────────────────────────────────────────────────────────
+
+@cli.group()
+def restricted():
+    """Ingest externally-held cohorts defined in a private registry.
+
+    Requires `cohorts_registry` in the config, pointing at a cohorts.yaml.
+    See cohorts.example.yaml for the schema. The registry is gitignored.
+    """
+
+
+def _load_cohorts(cfg, only: str | None):
+    """Discover every registered cohort (or just `only`) and assign EIDs."""
+    import click as _click
+
+    from tbooo.cohorts.discover import discover_samples
+    from tbooo.cohorts.eids import assign_eids
+    from tbooo.cohorts.phenotypes import CohortData
+    from tbooo.cohorts.registry import RegistryError, load_registry
+
+    if not cfg.cohorts_registry:
+        raise _click.ClickException(
+            "no cohorts_registry set in config. Copy cohorts.example.yaml to "
+            "cohorts.yaml, fill it in, and point cohorts_registry at it."
+        )
+    try:
+        registry = load_registry(cfg.cohorts_registry)
+    except RegistryError as exc:
+        raise _click.ClickException(str(exc)) from exc
+
+    if only:
+        if only not in registry:
+            raise _click.ClickException(
+                f"cohort {only!r} not in registry (have: {', '.join(sorted(registry))})"
+            )
+        registry = {only: registry[only]}
+
+    data = []
+    for name, cohort in sorted(registry.items()):
+        try:
+            samples = discover_samples(cohort)
+        except RegistryError as exc:  # DiscoveryError included
+            raise _click.ClickException(str(exc)) from exc
+        data.append(CohortData(cohort, samples, assign_eids(cohort, samples)))
+    return data
+
+
+ONLY_OPTION = click.option(
+    "--only", default=None, help="Restrict to a single cohort by name"
+)
+
+
+@restricted.command("discover")
+@CONFIG_OPTION
+@ONLY_OPTION
+def restricted_discover(config, only):
+    """Enumerate samples in each registered cohort (no writes)."""
+    from tbooo.utils import log
+
+    for item in _load_cohorts(_cfg(config), only):
+        n_sv = sum(
+            1 for s in item.samples if any(f.modality == "sv_vcf" for f in s.files)
+        )
+        log(f"{item.cohort.name}: {len(item.samples)} samples, {n_sv} with SV calls")
+
+
+@restricted.command("eids")
+@CONFIG_OPTION
+@ONLY_OPTION
+def restricted_eids(config, only):
+    """Assign EIDs and write the eid map + reheader rename files."""
+    from tbooo.cohorts.eids import write_eid_map, write_rename_file
+
+    cfg = _cfg(config)
+    for item in _load_cohorts(cfg, only):
+        write_eid_map(cfg, item.cohort, item.samples, item.eids)
+        write_rename_file(cfg, item.cohort, item.eids)
+
+
+@restricted.command("link")
+@CONFIG_OPTION
+@ONLY_OPTION
+def restricted_link(config, only):
+    """Build the UKB-shaped symlink tree and provenance manifests."""
+    from tbooo.cohorts.link import link_cohort
+
+    cfg = _cfg(config)
+    for item in _load_cohorts(cfg, only):
+        try:
+            link_cohort(cfg, item.cohort, item.samples, item.eids)
+        except RuntimeError as exc:
+            # Same surfacing as `restricted sv`: the containment and blind-prune
+            # refusals are operator-facing errors, not bugs to show as tracebacks.
+            raise click.ClickException(str(exc)) from exc
+
+
+@restricted.command("sv")
+@CONFIG_OPTION
+@ONLY_OPTION
+@click.option("--partition", default="short", show_default=True,
+              help="SLURM partition for the generated job")
+@click.option("--time-limit", default="01:00:00", show_default=True,
+              help="SLURM time limit for the generated job")
+def restricted_sv(config, only, partition, time_limit):
+    """Emit the SLURM script that builds the SV layer. Runs nothing itself."""
+    from tbooo.cohorts.sv import emit_sv_script
+
+    cfg = _cfg(config)
+    for item in _load_cohorts(cfg, only):
+        try:
+            emit_sv_script(
+                cfg, item.cohort, item.samples, item.eids,
+                partition=partition, time_limit=time_limit,
+            )
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+
+@restricted.command("phenotypes")
+@CONFIG_OPTION
+@ONLY_OPTION
+def restricted_phenotypes(config, only):
+    """Build participant.parquet, batch codes and putative pedigrees.
+
+    Unlike every other restricted stage, this one always covers every cohort in
+    the registry: participant.parquet and batch_codes.tsv are single tables
+    spanning all of them and are rewritten in full on each run. `--only` is
+    therefore rejected here rather than silently deleting the other cohorts.
+    """
+    from tbooo.cohorts.phenotypes import build_participants
+
+    if only:
+        raise click.ClickException(
+            "`--only` is not supported by `restricted phenotypes`. "
+            "participant.parquet and batch_codes.tsv are single tables covering "
+            "every cohort, rewritten in full on each run, so building them from "
+            "one cohort would delete every other cohort's rows. The other stages "
+            "are per-cohort and accept --only; this one does not. Re-run without it."
+        )
+
+    cfg = _cfg(config)
+    build_participants(cfg, _load_cohorts(cfg, None))
 
 
 # ── run ───────────────────────────────────────────────────────────────────────
