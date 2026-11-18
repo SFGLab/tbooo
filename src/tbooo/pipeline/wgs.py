@@ -210,12 +210,10 @@ def _symlink_sgdp_gvcfs(cfg: Config) -> None:
     linked = 0
     for _, row in eid_map.iterrows():
         eid = int(row["eid"])
-        ena_acc = row["ena_accession"]
-
-        matches = list(vcf_dir.glob(f"*{ena_acc}*.vcf.gz"))
-        if not matches:
+        name = row.get("vcf_filename")
+        if not isinstance(name, str) or not (vcf_dir / name).exists():
             continue
-        src_vcf = matches[0].resolve()
+        src_vcf = (vcf_dir / name).resolve()
         src_tbi = Path(str(src_vcf) + ".tbi")
 
         dest_dir = cfg.wgs_dir() / eid_prefix_dir(eid)

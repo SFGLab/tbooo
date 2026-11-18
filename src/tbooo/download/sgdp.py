@@ -1,13 +1,20 @@
 """Download SGDP VCF files and sample metadata.
 
-Metadata is fetched from the IGSR portal API (internationalgenome.org).
-Per-sample phased VCF files are fetched from ENA analysis results for PRJEB9586.
-SGDP CRAMs (~14 TB) are not downloaded.
+The per-sample VCF files are the project's own release, `<illumina id>.annotated.nh2.vcf.gz`,
+fetched from the ENA analysis records of PRJEB9586. They hold one record for every base of the
+genome, on hs37d5 (GRCh37), with unphased genotypes. `tbooo map sgdp-grch38` turns them into
+phased GRCh38 variant calls. SGDP CRAMs (~14 TB) are not downloaded.
+
+The sample table is built from two sources joined on the Illumina id, which is both the VCF
+file's prefix and the sample name inside it: the ENA analysis report (which VCF belongs to which
+sample) and the project's sample table (population, region, sex). The IGSR portal is not used:
+its BioSample ids are not the ids ENA files the VCFs under, so nothing joined.
 
 Outputs:
     data/raw/sgdp/sgdp_samples.tsv
-        columns: ena_accession, sample_alias, population, region, sex
-    data/raw/sgdp/vcf/<accession>.vcf.gz  (one per sample)
+        columns: sample_id, ena_accession, sample_alias, sgdp_id, population, region,
+                 country, sex, latitude, longitude, vcf_filename
+    data/raw/sgdp/vcf/<illumina id>.annotated.nh2.vcf.gz  (one per sample)
 """
 
 from __future__ import annotations
@@ -29,63 +36,64 @@ from tbooo.utils import (
     wget_download,
 )
 
-# IGSR portal API — returns all samples across all collections
-_IGSR_SAMPLE_API = "https://www.internationalgenome.org/api/beta/sample/_search/igsr_samples.tsv"
-_IGSR_PAYLOAD = {
-    "fields": [
-        "name", "sex", "biosampleId",
-        "populations.code", "populations.name",
-        "populations.superpopulationCode", "populations.superpopulationName",
-        "populations.elasticId",
-        "dataCollections.title",
-    ],
-    "column_names": [
-        "Sample name", "Sex", "Biosample ID",
-        "Population code", "Population name",
-        "Superpopulation code", "Superpopulation name",
-        "Population elastic ID",
-        "Data collections",
-    ],
-}
-
 # ENA portal API — analysis-level records (processed files, including VCFs)
 _ENA_ANALYSIS_API = (
     "https://www.ebi.ac.uk/ena/portal/api/filereport"
     "?accession=PRJEB9586"
     "&result=analysis"
-    "&fields=analysis_accession,sample_accession,submitted_ftp"
+    "&fields=analysis_accession,sample_accession,sample_alias,analysis_type,submitted_ftp"
     "&format=tsv"
     "&limit=0"
 )
 
+# The project's own sample table: one row per sequenced library, keyed by Illumina id.
+_SGDP_TABLE_URL = (
+    "https://sharehost.hms.harvard.edu/genetics/reich_lab/sgdp/"
+    "SGDP_metadata.279public.21signedLetter.44Fan.samples.txt"
+)
+
+SAMPLE_COLUMNS = [
+    "sample_id", "ena_accession", "sample_alias", "sgdp_id", "population", "region",
+    "country", "sex", "latitude", "longitude", "vcf_filename",
+]
+
+# The project table writes regions without spaces; the phenotype stage keys on these names.
+_REGION_NAMES = {
+    "WestEurasia": "West Eurasia",
+    "EastAsia": "East Asia",
+    "SouthAsia": "South Asia",
+    "CentralAsiaSiberia": "Central Asia / Siberia",
+    "America": "Native Americas",
+    "Oceania": "Oceania",
+    "Africa": "Africa",
+}
+
 
 def download_metadata(cfg: Config) -> None:
-    """Fetch SGDP sample metadata from the IGSR portal API."""
+    """Build the SGDP sample table from the ENA analysis report and the project's sample table."""
     out = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
     if out.exists():
-        log(f"  skip (exists): {out.name}")
-        return
+        if "sample_id" in pd.read_csv(out, sep="\t", nrows=0).columns:
+            log(f"  skip (exists): {out.name}")
+            return
+        # A table from the IGSR portal, keyed by an accession no VCF carries. Keep it aside.
+        stale = out.with_name("sgdp_samples.igsr.tsv")
+        out.replace(stale)
+        log(f"  {out.name} predates the Illumina-id key; moved to {stale.name} and rebuilt")
     ensure_dirs(cfg.sgdp_raw_dir())
 
-    log("Fetching SGDP sample metadata from IGSR portal…")
+    log("Fetching SGDP VCF records from ENA and the project sample table…")
+    analyses = _parse_ena_analyses(_fetch_url(_ENA_ANALYSIS_API))
     try:
-        body = json.dumps(_IGSR_PAYLOAD).encode()
-        req = urllib.request.Request(
-            _IGSR_SAMPLE_API,
-            data=body,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            tsv = resp.read().decode("utf-8")
+        table = _parse_sgdp_table(_fetch_url(_SGDP_TABLE_URL, encoding="latin-1"))
     except Exception as exc:
-        log(f"  IGSR API failed: {exc}")
-        log("  Writing empty metadata file — SGDP rows will be absent from phenotype table.")
-        out.write_text("ena_accession\tsample_alias\tpopulation\tregion\tsex\n")
-        return
+        log(f"  project sample table unavailable ({exc}); populations will read 'Unknown'")
+        table = {}
 
-    df = _parse_igsr_response(tsv, cfg.sgdp_populations)
+    df = _build_samples(analyses, table, cfg.sgdp_populations)
     df.to_csv(out, sep="\t", index=False)
-    log(f"  wrote {out} ({len(df)} samples)")
+    known = int((df["population"] != "Unknown").sum())
+    log(f"  wrote {out} ({len(df)} samples, {known} with a population)")
 
 
 def download_vcfs(
@@ -136,7 +144,6 @@ def download_vcfs(
     )
     _index_vcfs(cfg, [vcf_dir / fn for fn in url_map])
 
-    _link_vcfs_to_metadata(cfg, url_map)
     log("SGDP VCF download complete.")
 
 
@@ -246,101 +253,95 @@ def _index_vcfs(cfg: Config, vcfs: list[Path]) -> None:
 
 # ── Internals ─────────────────────────────────────────────────────────────────
 
-def _fetch_url(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=60) as resp:
-        return resp.read().decode("utf-8")
+def _fetch_url(url: str, *, encoding: str = "utf-8") -> str:
+    with urllib.request.urlopen(url, timeout=120) as resp:
+        return resp.read().decode(encoding)
 
 
-def _fetch_vcf_urls(allowed_accessions: set[str] | None) -> dict[str, tuple[str, str]]:
-    """Return {filename: (sample_accession, https_url)} for all VCF analysis files in PRJEB9586."""
-    tsv = _fetch_url(_ENA_ANALYSIS_API)
+def _parse_ena_analyses(tsv: str) -> list[dict[str, str]]:
+    """One row per VCF file of the ENA analysis report.
+
+    Each row has `sample_id` (the Illumina id: the file name up to its first dot, which is
+    also the sample name inside the VCF), `ena_accession`, `sample_alias`, `vcf_filename`
+    and `url`.
+    """
     lines = [l for l in tsv.splitlines() if l.strip()]
     if len(lines) < 2:
-        return {}
-
+        return []
     header = lines[0].split("\t")
-    result: dict[str, tuple[str, str]] = {}
+    rows: list[dict[str, str]] = []
     for line in lines[1:]:
         parts = dict(zip(header, line.split("\t")))
-        sample_acc = parts.get("sample_accession", "").strip()
-        ftp_field = parts.get("submitted_ftp", "").strip()
-
-        if allowed_accessions is not None and sample_acc not in allowed_accessions:
-            continue
-
-        for raw_url in ftp_field.split(";"):
+        for raw_url in parts.get("submitted_ftp", "").split(";"):
             raw_url = raw_url.strip()
             if not raw_url.endswith(".vcf.gz"):
                 continue
             filename = raw_url.rsplit("/", 1)[-1]
-            https_url = raw_url.replace("ftp://ftp.sra.ebi.ac.uk", "https://ftp.sra.ebi.ac.uk")
-            result[filename] = (sample_acc, https_url)
-
-    return result
-
-
-def _link_vcfs_to_metadata(cfg: Config, url_map: dict[str, tuple[str, str]]) -> None:
-    """Write vcf_filename column into sgdp_samples.tsv, joining on ena_accession == sample_accession."""
-    samples_tsv = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
-    if not samples_tsv.exists():
-        return
-
-    # {sample_accession: filename}  — last file wins if multiple per sample
-    acc_to_file: dict[str, str] = {sample_acc: fn for fn, (sample_acc, _) in url_map.items()}
-
-    meta = pd.read_csv(samples_tsv, sep="\t")
-    meta["vcf_filename"] = meta["ena_accession"].map(acc_to_file)
-    meta.to_csv(samples_tsv, sep="\t", index=False)
-
-    linked = meta["vcf_filename"].notna().sum()
-    log(f"  Linked {linked}/{len(meta)} metadata rows to VCF files.")
+            if "://" not in raw_url:
+                raw_url = "https://" + raw_url
+            rows.append({
+                "sample_id": filename.split(".", 1)[0],
+                "ena_accession": parts.get("sample_accession", "").strip(),
+                "sample_alias": parts.get("sample_alias", "").strip(),
+                "vcf_filename": filename,
+                "url": raw_url.replace("ftp://ftp.sra.ebi.ac.uk", "https://ftp.sra.ebi.ac.uk"),
+            })
+    return rows
 
 
-def _parse_igsr_response(tsv: str, filter_populations: list[str]) -> pd.DataFrame:
-    empty = pd.DataFrame(columns=["ena_accession", "sample_alias", "population", "region", "sex"])
-    lines = [l for l in tsv.splitlines() if l.strip()]
+def _parse_sgdp_table(text: str) -> dict[str, dict[str, str]]:
+    """The project's sample table as {Illumina id: row}. Its header line starts with '#'."""
+    lines = [l for l in text.splitlines() if l.strip()]
     if len(lines) < 2:
-        return empty
-
-    header = lines[0].split("\t")
-    rows = []
+        return {}
+    header = lines[0].lstrip("#").split("\t")
+    table: dict[str, dict[str, str]] = {}
     for line in lines[1:]:
-        parts = dict(zip(header, line.split("\t")))
-        if "Simons Genome Diversity Project" not in parts.get("Data collections", ""):
-            continue
+        row = dict(zip(header, line.split("\t")))
+        key = row.get("Illumina_ID", "").strip()
+        if key:
+            table[key] = row
+    return table
 
-        elastic_ids = parts.get("Population elastic ID", "").split(",")
-        pop_names = parts.get("Population name", "").split(",")
-        superpop_names = parts.get("Superpopulation name", "").split(",")
 
-        # Pick the SGDP-specific entry (elastic ID ends with "SGDP")
-        sgdp_idx = next(
-            (i for i, eid in enumerate(elastic_ids) if eid.strip().endswith("SGDP")),
-            None,
-        )
-        population = (
-            pop_names[sgdp_idx].strip()
-            if sgdp_idx is not None and sgdp_idx < len(pop_names)
-            else (pop_names[0].strip() if pop_names else "Unknown")
-        )
-        region = (
-            superpop_names[sgdp_idx].strip().replace(" (SGDP)", "")
-            if sgdp_idx is not None and sgdp_idx < len(superpop_names)
-            else (superpop_names[0].strip() if superpop_names else "Unknown")
-        )
+def _build_samples(
+    analyses: list[dict[str, str]],
+    table: dict[str, dict[str, str]],
+    filter_populations: list[str],
+) -> pd.DataFrame:
+    """Join the VCF records to the project table on the Illumina id.
 
+    A VCF whose id the table does not list keeps its ENA alias and reads 'Unknown' for
+    population and region. Rows are sorted by sample id, so EIDs assigned from this table
+    do not depend on the order ENA returns its report in.
+    """
+    rows = []
+    for a in analyses:
+        t = table.get(a["sample_id"], {})
         rows.append({
-            "ena_accession": parts.get("Biosample ID", "").strip(),
-            "sample_alias": parts.get("Sample name", "").strip(),
-            "population": population,
-            "region": region,
-            "sex": {"M": 1, "F": 2}.get(parts.get("Sex", "").strip(), 0),
+            "sample_id": a["sample_id"],
+            "ena_accession": a["ena_accession"],
+            "sample_alias": a["sample_alias"] or t.get("Sample_ID", "").strip(),
+            "sgdp_id": t.get("SGDP_ID", "").strip(),
+            "population": t.get("Population_ID", "").strip() or "Unknown",
+            "region": _REGION_NAMES.get(t.get("Region", "").strip(), t.get("Region", "").strip() or "Unknown"),
+            "country": t.get("Country", "").strip(),
+            "sex": {"M": 1, "F": 2}.get(t.get("Gender", "").strip(), 0),
+            "latitude": t.get("Latitude", "").strip(),
+            "longitude": t.get("Longitude", "").strip(),
+            "vcf_filename": a["vcf_filename"],
         })
-
-    if not rows:
-        return empty
-
-    df = pd.DataFrame(rows).drop_duplicates("ena_accession")
+    df = pd.DataFrame(rows, columns=SAMPLE_COLUMNS).drop_duplicates("sample_id")
     if filter_populations:
         df = df[df["population"].isin(filter_populations)]
-    return df
+    return df.sort_values("sample_id").reset_index(drop=True)
+
+
+def _fetch_vcf_urls(allowed_accessions: set[str] | None) -> dict[str, tuple[str, str]]:
+    """Return {filename: (sample_accession, https_url)} for all VCF analysis files in PRJEB9586."""
+    result: dict[str, tuple[str, str]] = {}
+    for row in _parse_ena_analyses(_fetch_url(_ENA_ANALYSIS_API)):
+        if allowed_accessions is not None and row["ena_accession"] not in allowed_accessions:
+            continue
+        result[row["vcf_filename"]] = (row["ena_accession"], row["url"])
+    return result

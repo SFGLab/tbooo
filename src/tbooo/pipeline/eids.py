@@ -2,7 +2,9 @@
 
 Outputs:
     data/metadata/eid_map_1kg.tsv   columns: eid, sample_id, pop, super_pop, sex, source
-    data/metadata/eid_map_sgdp.tsv  columns: eid, ena_accession, population, region, sex, source
+    data/metadata/eid_map_sgdp.tsv  columns: eid, sample_id, ena_accession, sample_alias, sgdp_id,
+                                             population, region, country, sex, latitude, longitude,
+                                             vcf_filename, source
     data/metadata/vcf_sample_rename_1kg.txt   old_id → eid  (one per line, space-separated)
     data/metadata/vcf_sample_rename_sgdp.txt  old_id → eid
 """
@@ -144,10 +146,14 @@ def _assign_sgdp(cfg: Config) -> None:
     out_map = cfg.metadata_dir() / "eid_map_sgdp.tsv"
     out_rename = cfg.metadata_dir() / "vcf_sample_rename_sgdp.txt"
 
-    if table_ok(out_map, min_lines=2) and table_ok(out_rename, min_lines=1):
+    if (
+        table_ok(out_map, min_lines=2)
+        and table_ok(out_rename, min_lines=1)
+        and "sample_id" in pd.read_csv(out_map, sep="\t", nrows=0).columns
+    ):
         log(f"  skip (valid): {out_map.name} + {out_rename.name}")
         return
-    remove(out_map, out_rename)  # clear any partial write before rebuilding
+    remove(out_map, out_rename)  # clear a partial write, or a map keyed by ENA accession
 
     samples_tsv = cfg.sgdp_raw_dir() / "sgdp_samples.tsv"
     if not samples_tsv.exists():
@@ -160,13 +166,21 @@ def _assign_sgdp(cfg: Config) -> None:
         log("  WARNING: SGDP metadata file is empty; skipping.")
         return
 
-    df = df.reset_index(drop=True)
+    if "sample_id" not in df.columns:
+        raise RuntimeError(
+            f"{samples_tsv} has no sample_id column: it predates the Illumina-id key and "
+            "matches no VCF. Run `tbooo download sgdp --no-vcf` to rebuild it."
+        )
+
+    df = df.sort_values("sample_id").reset_index(drop=True)
     df.insert(0, "eid", range(cfg.sgdp_eid_start, cfg.sgdp_eid_start + len(df)))
     df["source"] = "sgdp"
     df.to_csv(out_map, sep="\t", index=False)
     log(f"  wrote {out_map} ({len(df)} samples)")
 
+    # rename file: "<name inside the VCF> <eid>". The name inside an SGDP VCF is the
+    # Illumina id, not an ENA accession.
     with open(out_rename, "w") as f:
         for _, row in df.iterrows():
-            f.write(f"{row['ena_accession']}\t{row['eid']}\n")
+            f.write(f"{row['sample_id']}\t{row['eid']}\n")
     log(f"  wrote {out_rename}")
