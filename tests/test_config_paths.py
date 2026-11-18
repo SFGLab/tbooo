@@ -170,3 +170,26 @@ def test_phase3_vcf_chry_uses_its_own_naming(tmp_path):
     assert cfg.phase3_vcf("Y") == expected
     # chrY naming drops "shapeit2_mvncall" entirely and hardcodes v2b.
     assert "shapeit2" not in str(cfg.phase3_vcf("Y"))
+
+
+# ── NYGC 30x panel file names ────────────────────────────────────────────────
+
+def test_nygc_vcf_defaults_to_the_panel_with_structural_variants(tmp_path):
+    cfg = Config.load(_write_config(tmp_path))
+    assert cfg.kg_nygc_panel == "snv_indel_sv"
+    assert cfg.nygc_vcf("22").name == "1kGP_high_coverage_Illumina.chr22.filtered.SNV_INDEL_SV_phased_panel.vcf.gz"
+    assert cfg.nygc_vcf("X").name == "1kGP_high_coverage_Illumina.chrX.filtered.SNV_INDEL_SV_phased_panel.v2.vcf.gz"
+
+
+def test_nygc_vcf_keeps_the_2020_names_when_asked(tmp_path):
+    cfg = Config.load(_write_config(tmp_path, {"kg_nygc_panel": "snv_indel", "kg_nygc_date": "2020-08-05"}))
+    assert cfg.nygc_vcf("22").name == "CCDG_14151_B01_GRM_WGS_2020-08-05_chr22.filtered.shapeit2-duohmm-phased.vcf.gz"
+    assert cfg.nygc_vcf("X").name == "CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.v2.vcf.gz"
+
+
+def test_nygc_vcf_rejects_an_unknown_panel(tmp_path):
+    import pytest
+
+    cfg = Config.load(_write_config(tmp_path, {"kg_nygc_panel": "phase4"}))
+    with pytest.raises(ValueError, match="kg_nygc_panel"):
+        cfg.nygc_vcf("1")

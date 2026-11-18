@@ -171,9 +171,12 @@ def _intersect_exome(
     log(f"  intersecting with exome BED (chr{chrom})…")
     # bcftools uses 1-based regions; BED is 0-based — bcftools handles this correctly
     # when using --regions-file with a BED file (it auto-detects BED format by filename)
+    # The 2022 panel carries structural variants as symbolic alleles (<DEL>, <INS>, ...).
+    # Exome PLINK/BGEN has no representation for them, so they are left out here.
     run([
         cfg.tools.bcftools, "view",
         "--regions-file", str(bed),
+        "--exclude", 'ALT~"<"',
         "--output-type", "z",
         "--output", str(out),
         str(vcf),

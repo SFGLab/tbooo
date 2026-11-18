@@ -13,9 +13,13 @@ kg_phase3_release_date: "20130502"
 kg_phase3_vcf_version: "v5b"
 kg_phase3_base_url: "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502"
 
-# 1000 Genomes NYGC 30x high-coverage
+# 1000 Genomes NYGC 30x high-coverage.
+# The 2022 panel phases the structural variants together with the SNVs and indels.
+# For the 2020 panel (SNVs and indels only) set kg_nygc_panel: snv_indel and
+# kg_nygc_base_url to .../working/20201028_3202_phased; kg_nygc_date names its files.
+kg_nygc_panel: snv_indel_sv
 kg_nygc_date: "2020-08-05"
-kg_nygc_base_url: "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased"
+kg_nygc_base_url: "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV"
 
 # ─── SGDP ─────────────────────────────────────────────────────────────────────
 # Metadata only — no CRAM or VCF downloads.

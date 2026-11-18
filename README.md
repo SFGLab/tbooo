@@ -46,11 +46,11 @@ data/
 | Dataset | Role in TBOOO | Samples | Reference |
 |---------|--------------|---------|-----------|
 | **1KGP Phase 3** | Array + imputed genotypes | 2,504 unrelated | GRCh37 |
-| **1KGP NYGC 30x** | WGS CRAMs, cohort pVCF, WES simulation | 3,202 (incl. trios) | GRCh38 |
-| **SGDP** | Per-sample VCFs + phenotype diversity | 300 (142 populations) | GRCh38 |
+| **1KGP NYGC 30x** | Phased panel (SNVs, indels and structural variants), cohort pVCF, WES simulation | 3,202 (incl. trios) | GRCh38 |
+| **SGDP** | Per-sample all-site VCFs + phenotype diversity | 277 public samples downloaded (of 300; 142 populations) | hs37d5 (GRCh37), unphased |
 | **GEUVADIS** | Gene expression PCA → custom phenotype signal | 462 (5 populations, all in 1KGP) | GRCh37 |
 
-SGDP CRAMs (~14 TB) are not downloaded. Per-sample phased VCF files are fetched from ENA analysis results and merged into per-chromosome pVCFs with EID renaming. GEUVADIS data is downloaded as the pre-computed gene-level RPKM matrix (no raw reads); PCA scores are stored as `geuvadis_pc1`–`geuvadis_pc10` columns in `participant.parquet`. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
+SGDP CRAMs (~14 TB) are not downloaded. Per-sample VCF files (`*.annotated.nh2.vcf.gz`, ~27 GB each) are fetched from ENA analysis results and merged into per-chromosome pVCFs with EID renaming. These files hold one record for every base of the genome, on hs37d5, with unphased genotypes and no structural variants. The 1KGP panel is GRCh38, so the merged NYGC + SGDP pVCF mixes two builds until the SGDP calls are lifted over. GEUVADIS data is downloaded as the pre-computed gene-level RPKM matrix (no raw reads); PCA scores are stored as `geuvadis_pc1`–`geuvadis_pc10` columns in `participant.parquet`. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
 
 ---
 

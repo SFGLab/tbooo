@@ -67,6 +67,12 @@ class Config:
     wgs_sgdp_merge_threads: int = 8   # SGDP ~280-way merge (compute heavy)
     wgs_final_merge_threads: int = 4  # final NYGC + SGDP merge per chromosome
 
+    # Which release of the NYGC 30x phased panel `kg_nygc_base_url` points at.
+    #   snv_indel_sv  20220422_3202_phased_SNV_INDEL_SV: SNVs, indels and structural
+    #                 variants phased together. File names carry no date.
+    #   snv_indel     20201028_3202_phased: SNVs and indels only, named by `kg_nygc_date`.
+    kg_nygc_panel: str = "snv_indel_sv"
+
     # Path to the cohort registry (gitignored). Empty = restricted stages disabled.
     cohorts_registry: str = ""
 
@@ -153,6 +159,15 @@ class Config:
         return self.kg_raw_dir() / f"ALL.chr{chrom}.phase3_shapeit2_mvncall_integrated_{ver}.{date}.genotypes.vcf.gz"
 
     def nygc_vcf(self, chrom: str) -> Path:
+        if self.kg_nygc_panel == "snv_indel_sv":
+            # chrX was reissued once; the other chromosomes have no version suffix.
+            version = ".v2" if chrom == "X" else ""
+            name = f"1kGP_high_coverage_Illumina.chr{chrom}.filtered.SNV_INDEL_SV_phased_panel{version}.vcf.gz"
+            return self.kg_raw_dir() / name
+        if self.kg_nygc_panel != "snv_indel":
+            raise ValueError(
+                f"kg_nygc_panel is {self.kg_nygc_panel!r}; expected 'snv_indel_sv' or 'snv_indel'"
+            )
         date = self.kg_nygc_date
         if chrom == "X":
             return self.kg_raw_dir() / f"CCDG_14151_B01_GRM_WGS_{date}_chrX.filtered.eagle2-phased.v2.vcf.gz"
