@@ -16,6 +16,11 @@ class Tools:
     samtools: str = "samtools"
     king: str = "king"
     wget: str = "wget"
+    # The SGDP GRCh38 stage. picard and beagle are the launchers that take a java heap option
+    # first, as the bioconda packages install them.
+    bgzip: str = "bgzip"
+    picard: str = "picard"
+    beagle: str = "beagle"
 
 
 @dataclass
@@ -64,7 +69,7 @@ class Config:
     # `bcftools --threads N` per task in the WGS pVCF stage.
     # Each parallel chromosome job uses these threads, so total CPU ≈ jobs × threads.
     wgs_nygc_threads: int = 4         # NYGC reheader + index (one multi-sample VCF; I/O bound)
-    wgs_sgdp_merge_threads: int = 8   # SGDP ~280-way merge (compute heavy)
+    wgs_sgdp_merge_threads: int = 8   # bcftools and Beagle threads of the SGDP GRCh38 stage
     wgs_final_merge_threads: int = 4  # final NYGC + SGDP merge per chromosome
 
     # Which release of the NYGC 30x phased panel `kg_nygc_base_url` points at.
@@ -72,6 +77,9 @@ class Config:
     #                 variants phased together. File names carry no date.
     #   snv_indel     20201028_3202_phased: SNVs and indels only, named by `kg_nygc_date`.
     kg_nygc_panel: str = "snv_indel_sv"
+
+    # Java heap, in GB, of Picard LiftoverVcf and Beagle in the SGDP GRCh38 stage.
+    sgdp38_java_gb: int = 48
 
     # Path to the cohort registry (gitignored). Empty = restricted stages disabled.
     cohorts_registry: str = ""
@@ -143,7 +151,23 @@ class Config:
         return self.sgdp_raw_dir() / "vcf"
 
     def sgdp_pvcf(self, chrom: str) -> Path:
+        """The merged GRCh37 file with every base, which an earlier version wrote. The SGDP
+        GRCh38 stage reads it where it exists and nothing writes it now."""
         return self.sgdp_raw_dir() / "pvcf" / f"sgdp_c{chrom}.pvcf.gz"
+
+    def sgdp38_dir(self) -> Path:
+        return self.sgdp_raw_dir() / "grch38"
+
+    def sgdp38_unphased(self, chrom: str) -> Path:
+        """SGDP variant records lifted to GRCh38, before phasing."""
+        return self.sgdp38_dir() / f"sgdp_c{chrom}.unphased.vcf.gz"
+
+    def sgdp38_phased(self, chrom: str) -> Path:
+        """SGDP on GRCh38, phased against the 30x panel, samples named by EID."""
+        return self.sgdp38_dir() / f"sgdp_c{chrom}.phased.vcf.gz"
+
+    def sgdp38_counts(self, chrom: str) -> Path:
+        return self.sgdp38_dir() / f"sgdp_c{chrom}.counts.tsv"
 
     def nygc_pvcf(self, chrom: str) -> Path:
         """Intermediate per-chromosome NYGC pVCF (EID-reheadered, before merging with SGDP)."""

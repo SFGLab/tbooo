@@ -3,11 +3,16 @@
 Per-sample gVCFs (Field 24051, "Whole genome variant call files (GVCFs) (DRAGEN)") — both cohorts:
   - 1KGP: extract per-sample VCF from NYGC 30x cohort VCFs → <EID>_24051_0_0.g.vcf.gz
   - SGDP: symlink downloaded per-sample VCFs        → <EID>_24051_0_0.g.vcf.gz
+  The two differ in build and content. A 1KGP file is on GRCh38 and holds the records its
+  sample carries. An SGDP file is the project's own release on GRCh37, with every base.
 
 Cohort pVCF (Field 24310, "DRAGEN population level WGS variants, pVCF format") — both cohorts merged:
   - 1KGP: reheader NYGC per-chromosome VCF with EIDs → raw/1kg/pvcf/nygc_c{chrom}.pvcf.gz
-  - SGDP: merge per-sample VCFs by chromosome        → raw/sgdp/pvcf/sgdp_c{chrom}.pvcf.gz
+  - SGDP: the phased GRCh38 file of `tbooo map sgdp38` → raw/sgdp/grch38/sgdp_c{chrom}.phased.vcf.gz
   - Combined: bcftools merge nygc + sgdp             → Bulk/Whole genome sequences/ukb24310_c{chrom}_b0_v1.pvcf.gz
+  Both inputs hold variant records alone. In the merged file a cohort's samples are missing at
+  a record only the other cohort has: the cohort either carries the reference allele there or
+  has no call, and the files do not say which.
 
 Individual CRAMs (Field 24048) are not mirrored: the 30x CRAMs are not downloaded
 (tens of GB per sample), so there is no source to link.
@@ -40,12 +45,10 @@ def build_gvcfs(cfg: Config, chroms: list[str]) -> None:
 def build_pvcf(cfg: Config, chroms: list[str]) -> None:
     """Build cohort pVCF (Field 24310) by merging NYGC and SGDP per-chromosome VCFs.
 
-    Produces two intermediates (nygc_pvcf, sgdp_pvcf) then merges into the
-    final UKB-mirrored output.  Either intermediate is used alone if the other
-    is absent (e.g. SGDP VCFs not yet downloaded).
+    The NYGC side is built here. The SGDP side is the output of `tbooo map sgdp38`, on the
+    same build as NYGC. Where it is absent the NYGC file is used alone.
     """
     _build_nygc_pvcf(cfg, chroms)
-    _build_sgdp_pvcf(cfg, chroms)
     _merge_pvcfs(cfg, chroms)
     log("pVCF build complete.")
 
@@ -278,74 +281,6 @@ def _build_nygc_pvcf(cfg: Config, chroms: list[str]) -> None:
         ensure_vcf(out.name, out, _build)
 
 
-def _build_sgdp_pvcf(cfg: Config, chroms: list[str]) -> None:
-    vcf_dir = cfg.sgdp_vcf_dir()
-    sample_vcfs = sorted(vcf_dir.glob("*.vcf.gz")) if vcf_dir.exists() else []
-    if not sample_vcfs:
-        log("  No SGDP VCF files found; skipping SGDP pVCF. Run `tbooo download sgdp` first.")
-        return
-
-    rename_file = cfg.metadata_dir() / "vcf_sample_rename_sgdp.txt"
-    if not rename_file.exists():
-        log("  WARNING: SGDP rename file not found; skipping. Run `tbooo map eids` first.")
-        return
-
-    pvcf_dir = cfg.sgdp_raw_dir() / "pvcf"
-    ensure_dirs(pvcf_dir, cfg.tmp_dir)
-    log(f"[sgdp pVCF] {len(sample_vcfs)} sample VCF(s) found")
-
-    # Detect chromosome naming once (chrN vs N) from the first file's tabix index.
-    chrom_prefix = _detect_chrom_prefix(cfg, sample_vcfs[0])
-
-    # Write a stable file-of-filenames so the merge command stays short.
-    list_file = cfg.tmp_dir / "sgdp_vcf_list.txt"
-    list_file.write_text("\n".join(str(v) for v in sample_vcfs) + "\n")
-
-    threads = max(1, cfg.wgs_sgdp_merge_threads)
-
-    for chrom in chroms:
-        out = cfg.sgdp_pvcf(chrom)
-        region = f"{chrom_prefix}{chrom}"
-        tmp_merged = cfg.tmp_dir / f"sgdp_merged_chr{chrom}.vcf.gz"
-
-        def _build(out=out, region=region, tmp_merged=tmp_merged) -> None:
-            log(f"  [sgdp pVCF] chr{chrom} — merging {len(sample_vcfs)} samples in one pass "
-                f"(region={region}, threads={threads})")
-            # One `bcftools merge` reads each sample's pre-built tabix index for the
-            # requested region only — no per-sample view/index step required.
-            run([cfg.tools.bcftools, "merge",
-                 "--file-list", str(list_file),
-                 "--regions", region,
-                 "--threads", str(threads),
-                 "--output-type", "z",
-                 "--output", str(tmp_merged)])
-
-            # Reheader (rename samples → EIDs) writes the final output.
-            run([cfg.tools.bcftools, "reheader",
-                 "--samples", str(rename_file),
-                 "--threads", str(threads),
-                 "--output", str(out),
-                 str(tmp_merged)])
-            run([cfg.tools.bcftools, "index", "--tbi",
-                 "--threads", str(threads), str(out)])
-
-            tmp_merged.unlink(missing_ok=True)
-            log(f"    → {out.name}")
-
-        # Purge the half-built merge tmp too, so a rebuild can't reuse stale state.
-        ensure_vcf(out.name, out, _build, tmp=(tmp_merged,))
-
-
-def _detect_chrom_prefix(cfg: Config, vcf: Path) -> str:
-    """Return 'chr' if the VCF's contigs use a chr-prefix, else ''."""
-    proc = run([cfg.tools.bcftools, "index", "--stats", str(vcf)], capture=True)
-    for line in proc.stdout.decode().splitlines():
-        parts = line.split()
-        if parts and parts[0] not in ("", "*"):
-            return "chr" if parts[0].startswith("chr") else ""
-    return ""
-
-
 def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
     """Merge NYGC and SGDP intermediate pVCFs into the final Field 24310 output."""
     ensure_dirs(cfg.wgs_dir())
@@ -354,8 +289,10 @@ def _merge_pvcfs(cfg: Config, chroms: list[str]) -> None:
         out = cfg.wgs_pvcf(chrom)
         out_tbi = Path(str(out) + ".tbi")
         nygc = cfg.nygc_pvcf(chrom)
-        sgdp = cfg.sgdp_pvcf(chrom)
+        sgdp = cfg.sgdp38_phased(chrom)
         sources = [p for p in (nygc, sgdp) if p.exists()]
+        if not sgdp.exists():
+            log(f"  chr{chrom}: no phased GRCh38 SGDP file; run `tbooo map sgdp38` to add SGDP")
 
         if not sources:
             log(f"  SKIP chr{chrom}: no intermediate pVCFs available")

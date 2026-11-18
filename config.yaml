@@ -56,8 +56,11 @@ deep_check_workers: 36
 # `bcftools --threads N` per task in the WGS pVCF stage.
 # Each parallel chromosome job uses these threads, so total CPU ≈ jobs × threads.
 wgs_nygc_threads: 36         # NYGC reheader + index (one multi-sample VCF; I/O bound)
-wgs_sgdp_merge_threads: 36   # SGDP ~280-way merge (compute heavy)
+wgs_sgdp_merge_threads: 36   # bcftools and Beagle threads of the SGDP GRCh38 stage
 wgs_final_merge_threads: 36  # final NYGC + SGDP merge per chromosome
+
+# Java heap, in GB, of Picard LiftoverVcf and Beagle in the SGDP GRCh38 stage.
+sgdp38_java_gb: 48
 
 # ─── External tools ───────────────────────────────────────────────────────────
 # Override any entry if the binary is not on PATH.
@@ -69,3 +72,6 @@ tools:
   samtools: samtools
   king: king
   wget: wget
+  bgzip: bgzip
+  picard: picard
+  beagle: beagle

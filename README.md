@@ -28,8 +28,8 @@ data/
 ├── raw/
 │   └── sgdp/
 │       ├── sgdp_samples.tsv                                  # SGDP sample metadata
-│       ├── vcf/<accession>.vcf.gz                            # per-sample phased VCFs (from ENA)
-│       └── pvcf/sgdp_c{1-22,X}.{pvcf.gz,pvcf.gz.tbi}       # merged SGDP pVCF per chromosome
+│       ├── vcf/<Illumina id>.annotated.nh2.vcf.gz            # per-sample VCFs from ENA: every base, GRCh37, unphased
+│       └── grch38/sgdp_c{1-22}.phased.{vcf.gz,vcf.gz.tbi}    # variant records on GRCh38, phased (tbooo map sgdp38)
 └── metadata/
     ├── eid_map_1kg.tsv                                       # 1KGP sample → synthetic EID
     ├── eid_map_sgdp.tsv                                      # SGDP sample → synthetic EID
@@ -50,7 +50,7 @@ data/
 | **SGDP** | Per-sample all-site VCFs + phenotype diversity | 277 public samples downloaded (of 300; 142 populations) | hs37d5 (GRCh37), unphased |
 | **GEUVADIS** | Gene expression PCA → custom phenotype signal | 462 (5 populations, all in 1KGP) | GRCh37 |
 
-SGDP CRAMs (~14 TB) are not downloaded. Per-sample VCF files (`*.annotated.nh2.vcf.gz`, ~27 GB each) are fetched from ENA analysis results and merged into per-chromosome pVCFs with EID renaming. These files hold one record for every base of the genome, on hs37d5, with unphased genotypes and no structural variants. The 1KGP panel is GRCh38, so the merged NYGC + SGDP pVCF mixes two builds until the SGDP calls are lifted over. GEUVADIS data is downloaded as the pre-computed gene-level RPKM matrix (no raw reads); PCA scores are stored as `geuvadis_pc1`–`geuvadis_pc10` columns in `participant.parquet`. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
+SGDP CRAMs (~14 TB) are not downloaded. Per-sample VCF files (`*.annotated.nh2.vcf.gz`, ~27 GB each) are fetched from ENA analysis results. These files hold one record for every base of the genome, on hs37d5, with unphased genotypes and no structural variants. `tbooo map sgdp38` takes their variant records, lifts them to GRCh38 and phases them with Beagle against the 1KGP 30x panel, one file per autosome with EIDs as sample names. The cohort pVCF merges that file with the 1KGP panel, both on GRCh38. GEUVADIS data is downloaded as the pre-computed gene-level RPKM matrix (no raw reads); PCA scores are stored as `geuvadis_pc1`–`geuvadis_pc10` columns in `participant.parquet`. All data is publicly available without application. See [docs/2_data_sources.md](docs/2_data_sources.md) for full access details.
 
 ---
 
@@ -190,6 +190,7 @@ tbooo map eids
 # Build each data layer
 tbooo map array       # Phase 3 VCF → PLINK (Field 22418, GRCh37)
 tbooo map imputed     # Phase 3 VCF → BGEN  (Field 22828, GRCh37)
+tbooo map sgdp38            # SGDP variant records → GRCh38, phased against the 30x panel (autosomes)
 tbooo map wgs               # per-sample gVCFs (Field 24051) + merged pVCF (NYGC+SGDP → Field 24310)
 tbooo map wgs --no-pvcf     # gVCFs only (skip pVCF build)
 tbooo map wgs --no-gvcf     # pVCF only (skip per-sample gVCFs)
@@ -289,6 +290,6 @@ Clinical fields (diagnoses, medications, hospital records, imaging) are present 
 - **Array coverage**: Only variants present in both the 1KGP Phase 3 VCFs and the array manifest are included. Affymetrix-specific probes with no 1KGP equivalent are absent.
 - **Imputation dosages**: BGEN files are built from hard genotype calls; dosage probabilities are 0 or 1. Real UKB imputed data has fractional uncertainty.
 - **Population composition**: 1KGP/SGDP are globally diverse; UKB is ~94% European. Allele frequency distributions differ.
-- **SGDP CRAMs not downloaded**: Only per-sample phased VCFs are fetched from ENA (much smaller than ~14 TB of CRAMs). SGDP genotype data feeds into `data/raw/sgdp/pvcf/` - it is not merged into the UKB-mirrored Bulk/ tree, which remains 1KGP-only.
+- **SGDP CRAMs not downloaded**: Only the per-sample VCFs are fetched from ENA (much smaller than ~14 TB of CRAMs). They are unphased and on GRCh37. `tbooo map sgdp38` writes the phased GRCh38 files in `data/raw/sgdp/grch38/`, and `tbooo map wgs` merges them into the Field 24310 pVCF. A variant that one SGDP sample alone carries has no information for its phase. The X chromosome of SGDP is not built. SGDP has no array, imputed or exome files.
 - **No clinical phenotypes**: Only metadata-derivable fields are populated (sex, ancestry, batch). Disease diagnoses, hospital records, imaging, and longitudinal data are not available.
 - **WES is simulated**: Intersection of WGS variants with an exome capture BED is used, not true capture sequencing. Capture efficiency gradients and strand bias differ from real exome data.

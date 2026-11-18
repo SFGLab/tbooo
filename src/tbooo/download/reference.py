@@ -31,13 +31,50 @@ _GRCH38_FASTA_URL = (
 )
 
 
+# The SGDP GRCh38 stage: the UCSC chain from GRCh37 to GRCh38, and the GRCh38 genetic maps in
+# PLINK format that Beagle reads.
+_CHAIN_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz"
+_BEAGLE_MAPS_URL = "https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip"
+
+
 def download_all(cfg: Config) -> None:
     ensure_dirs(cfg.reference_dir)
     _download_exome_bed(cfg)
     _download_genetic_maps(cfg)
     _download_grch37(cfg)
     _download_grch38(cfg)
+    _download_liftover_chain(cfg)
+    _download_beagle_maps(cfg)
     log("All reference files ready.")
+
+
+def _download_liftover_chain(cfg: Config) -> None:
+    from tbooo.pipeline.sgdp38 import CHAIN
+    dest = cfg.reference_dir / CHAIN
+    if dest.exists() and dest.stat().st_size > 0:
+        log(f"  skip (exists): {dest.name}")
+        return
+    ensure_dirs(dest.parent)
+    wget_download(_CHAIN_URL, dest, tool_wget=cfg.tools.wget)
+    log(f"  liftover chain ready → {dest}")
+
+
+def _download_beagle_maps(cfg: Config) -> None:
+    import zipfile
+
+    from tbooo.pipeline.sgdp38 import BEAGLE_MAP
+    # The archive holds the maps twice. Those under chr_in_chrom_field name the chromosome
+    # chr22, as the GRCh38 files do.
+    if (cfg.reference_dir / BEAGLE_MAP.format(chrom="22")).exists():
+        log("  skip (exists): genetic_maps/beagle_GRCh38/")
+        return
+    maps_dir = cfg.reference_dir / "genetic_maps" / "beagle_GRCh38"
+    ensure_dirs(maps_dir)
+    archive = maps_dir / "plink.GRCh38.map.zip"
+    wget_download(_BEAGLE_MAPS_URL, archive, tool_wget=cfg.tools.wget)
+    with zipfile.ZipFile(archive) as z:
+        z.extractall(maps_dir)
+    log(f"  Beagle genetic maps ready → {maps_dir}")
 
 
 # ── Exome BED ─────────────────────────────────────────────────────────────────
