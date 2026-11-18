@@ -25,8 +25,8 @@ B=https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_co
 CHAIN=$D/reference/liftover/hg19ToHg38.over.chain.gz
 [ -s $CHAIN ] || wget -q -O $CHAIN https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
 MAPDIR=$D/reference/genetic_maps/beagle_GRCh38
-[ -s $MAPDIR/plink.chr$C.GRCh38.map ] || { wget -q -O $MAPDIR/plink.GRCh38.map.zip https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip && python3 -c "import zipfile; zipfile.ZipFile('$MAPDIR/plink.GRCh38.map.zip').extractall('$MAPDIR')"; }
-ls -la $PANEL $CHAIN $MAPDIR | head -8; head -2 $MAPDIR/plink.chr$C.GRCh38.map
+[ -s $MAPDIR/chr_in_chrom_field/plink.chrchr$C.GRCh38.map ] || { wget -q -O $MAPDIR/plink.GRCh38.map.zip https://bochet.gcc.biostat.washington.edu/beagle/genetic_maps/plink.GRCh38.map.zip && python3 -c "import zipfile; zipfile.ZipFile('$MAPDIR/plink.GRCh38.map.zip').extractall('$MAPDIR')"; }
+ls -la $PANEL $CHAIN $MAPDIR | head -8; MAP=$MAPDIR/chr_in_chrom_field/plink.chrchr$C.GRCh38.map; head -2 $MAP
 
 step "the all-site file"
 SRC=$D/raw/sgdp/pvcf/sgdp_c$C.pvcf.gz
@@ -78,7 +78,7 @@ if [ -s shared.samples ]; then
 fi
 
 step "phase and impute against the panel"
-beagle -Xmx56g gt=4.grch38.vcf.gz ref=$PANEL map=$MAPDIR/plink.chr$C.GRCh38.map out=6.beagle nthreads=$N impute=true 2>&1 | grep -vE "^$" | tail -25 || echo "BEAGLE FAILED"
+beagle -Xmx56g gt=4.grch38.vcf.gz ref=$PANEL map=$MAP out=6.beagle nthreads=$N impute=true 2>&1 | grep -vE "^$" | tail -25 || echo "BEAGLE FAILED"
 if [ -s 6.beagle.vcf.gz ]; then
   bcftools index -t 6.beagle.vcf.gz
   echo "beagle output records: $(count 6.beagle.vcf.gz)"

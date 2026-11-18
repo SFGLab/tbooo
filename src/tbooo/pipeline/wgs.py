@@ -52,6 +52,12 @@ def build_pvcf(cfg: Config, chroms: list[str]) -> None:
 
 # ── gVCF internals ────────────────────────────────────────────────────────────
 
+# +split applies --include to each output file on its own, so every sample's file gets the
+# records where that sample has a non-reference allele. --keep-tags drops INFO, whose allele
+# counts describe the cohort and are wrong for a single sample, and keeps the genotype.
+_SPLIT_CARRIED_ONLY = ["--include", 'GT="alt"', "--keep-tags", "FMT/GT"]
+
+
 def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
     """Extract per-sample 1KGP gVCFs from the NYGC 30x cohort VCFs.
 
@@ -60,6 +66,13 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
     each sample's per-chrom pieces. The previous per-sample `view` approach scanned
     every multi-GB chromosome VCF once per sample (n_samples × n_chroms full scans),
     which is intractable for 3,202 samples.
+
+    Each file holds the records its sample carries, and the genotype alone. Without
+    that filter +split writes every site of the cohort into every sample's file with
+    the cohort's INFO on each line: a sample carries about 6% of them, so chromosome 1
+    alone came to 2.5 TB and the whole genome to tens of terabytes, twice over once the
+    pieces were concatenated. A phased panel has no reference blocks to give, so these
+    are variant-only files under the gVCF field's name.
     """
     kg_map = _load_eid_map(cfg, "eid_map_1kg.tsv")
     if kg_map.empty:
@@ -94,8 +107,12 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
     # a chromosome that already finished. (+split is a plugin with no --threads.)
     split_dirs: list[Path] = []
     for chrom, src in avail:
-        split_dir = cfg.tmp_dir / f"nygc_split_chr{chrom}"
+        split_dir = cfg.tmp_dir / f"nygc_variants_chr{chrom}"
         marker = split_dir / ".split-complete"
+        stale = cfg.tmp_dir / f"nygc_split_chr{chrom}"
+        if stale.exists():
+            log(f"  NOTE: {stale} holds unfiltered per-sample files from an earlier "
+                "version (every cohort site in every file). It is not used and can be deleted.")
         if not marker.exists():
             ensure_dirs(split_dir)
             n_batches = (len(sample_ids) + batch_size - 1) // batch_size
@@ -103,6 +120,7 @@ def _build_nygc_gvcfs(cfg: Config, chroms: list[str]) -> None:
                 f"({len(sample_ids)} samples, {n_batches} batch(es))…")
             for i in range(0, len(sample_ids), batch_size):
                 cmd = [cfg.tools.bcftools, "+split", str(src),
+                       *_SPLIT_CARRIED_ONLY,
                        "--output-type", "z", "--output", str(split_dir)]
                 if n_batches > 1:
                     sfile = cfg.tmp_dir / f"split_samples_chr{chrom}_{i}.txt"
