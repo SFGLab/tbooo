@@ -56,7 +56,11 @@ def build_expression_pcs(cfg: Config) -> None:
     out_pcs = cfg.metadata_dir() / "gtex_expression_pcs.tsv"
     out_map = cfg.metadata_dir() / "eid_map_gtex.tsv"
     if table_ok(out_pcs, min_lines=2) and table_ok(out_map, min_lines=2):
+        # The saved rows still go into participant.parquet, which may have been
+        # built or rebuilt since they were written.
         log(f"  skip (valid): {out_pcs.name} + {out_map.name}")
+        saved = pd.read_csv(out_pcs, sep="\t")
+        _patch_parquet(cfg, saved, [c for c in saved.columns if c != "eid"])
         return
 
     log(f"Loading GTEx {REPRESENTATIVE_TISSUE} TPM…")
