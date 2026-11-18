@@ -20,6 +20,7 @@ import pandas as pd
 
 from tbooo.config import Config
 from tbooo.integrity import bgen_ok, ensure, plink_ok, remove, vcf_ok
+from tbooo.pipeline.samples import write_sample_file
 from tbooo.utils import ensure_dirs, log, run
 
 _GRCH38_FASTA = "GRCh38/GRCh38_full_analysis_set_plus_decoy_hla.fa"
@@ -37,7 +38,6 @@ def run_wes_pipeline(cfg: Config, chroms: list[str]) -> None:
     rename_file = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
     eid_map = _load_eid_map(cfg)
     sample_path = cfg.wes_bgen_dir() / "ukb23159_samples.sample"
-    _write_sample_file(eid_map, sample_path)
 
     for chrom in chroms:
         log(f"[wes] chromosome {chrom}")
@@ -45,7 +45,7 @@ def run_wes_pipeline(cfg: Config, chroms: list[str]) -> None:
         if not src.exists():
             log(f"  SKIP: NYGC VCF not found: {src}")
             continue
-        _process_chrom(cfg, chrom, src, exome_bed, rename_file, sample_path)
+        _process_chrom(cfg, chrom, src, exome_bed, rename_file, sample_path, eid_map)
 
     log("WES pipeline complete.")
 
@@ -57,6 +57,7 @@ def _process_chrom(
     exome_bed: Path,
     rename_file: Path,
     sample_path: Path,
+    eid_map: pd.DataFrame,
 ) -> None:
     plink_stem = cfg.wes_stem(chrom)
     bgen_stem = cfg.wes_bgen_stem(chrom)
@@ -71,7 +72,7 @@ def _process_chrom(
         check=lambda: plink_ok(plink_stem) and bgen_ok(bgen_stem),
         purge=_purge,
         build=lambda: _build_chrom(cfg, chrom, src_vcf, exome_bed,
-                                   rename_file, sample_path, plink_stem, bgen_stem),
+                                   rename_file, sample_path, plink_stem, bgen_stem, eid_map),
     )
 
 
@@ -84,6 +85,7 @@ def _build_chrom(
     sample_path: Path,
     plink_stem: Path,
     bgen_stem: Path,
+    eid_map: pd.DataFrame,
 ) -> None:
     ensure_dirs(cfg.tmp_dir)
     tmp_intersected = cfg.tmp_dir / f"wes_chr{chrom}_intersected.vcf.gz"
@@ -147,8 +149,8 @@ def _build_chrom(
         "-og", str(bgen_path),
         "-ofiletype", "bgen_v1.2",
         "-bgen-bits", "8",
-        "-os", str(sample_path),
     ])
+    write_sample_file(cfg, tmp_norm, eid_map, sample_path)
     run([cfg.tools.bgenix, "-g", str(bgen_path), "-index"])
 
     # Cleanup
@@ -182,17 +184,6 @@ def _intersect_exome(
         str(vcf),
     ])
     run([cfg.tools.bcftools, "index", "--tbi", str(out)])
-
-
-def _write_sample_file(eid_map: pd.DataFrame, path: Path) -> None:
-    if path.exists():
-        return
-    lines = ["ID_1 ID_2 missing sex\n", "0 0 0 D\n"]
-    for _, row in eid_map.iterrows():
-        eid = row["eid"]
-        sex = int(row.get("sex", 0))
-        lines.append(f"{eid} {eid} 0 {sex}\n")
-    path.write_text("".join(lines))
 
 
 def _load_eid_map(cfg: Config) -> pd.DataFrame:
