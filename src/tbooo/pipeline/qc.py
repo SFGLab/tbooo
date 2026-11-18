@@ -45,7 +45,8 @@ def build_qc_files(cfg: Config) -> None:
     het_stats = _compute_het(cfg, merged_plink)
     king_kin = _run_king(cfg, merged_plink)
 
-    _write_sqc(cfg, eid_map, het_stats)
+    fam = pd.read_csv(Path(str(merged_plink) + ".fam"), sep=r"\s+", header=None)
+    _write_sqc(cfg, eid_map, het_stats, set(fam[1].astype(str)))
     _write_rel(cfg, eid_map, king_kin)
 
     log("QC file generation complete.")
@@ -201,14 +202,23 @@ def _run_king(cfg: Config, plink_stem: Path) -> pd.DataFrame:
 
 # ── Output writers ────────────────────────────────────────────────────────────
 
-def _write_sqc(cfg: Config, eid_map: pd.DataFrame, het_stats: pd.DataFrame) -> None:
+def _write_sqc(cfg: Config, eid_map: pd.DataFrame, het_stats: pd.DataFrame,
+               array_eids: set[str] | None = None) -> None:
+    """Write ukb_sqc_v2.txt.
+
+    `array_eids` holds the EIDs of the array genotype files. A PCA is computed on those, so a
+    participant outside them was not used in it: SGDP, and the 698 samples of the 30x panel
+    that Phase 3 does not have. None counts every 1KGP participant.
+    """
     out = cfg.metadata_dir() / "ukb_sqc_v2.txt"
 
     # Build lookup from sample_id → eid row
     sqc = eid_map.copy()
 
-    # used.in.pca.calculation: 1 for 1KGP unrelated samples, 0 for SGDP
-    sqc["used.in.pca.calculation"] = (sqc["source"] == "1kg").astype(int)
+    used = sqc["source"] == "1kg"
+    if array_eids is not None:
+        used &= sqc["eid"].astype(str).isin(array_eids)
+    sqc["used.in.pca.calculation"] = used.astype(int)
 
     # in.white.british.ancestry.subset: 1 for GBR EUR samples
     sqc["in.white.british.ancestry.subset"] = (

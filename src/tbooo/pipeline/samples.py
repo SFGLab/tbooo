@@ -1,4 +1,4 @@
-"""BGEN sample files written in the order of the genotype file they describe."""
+"""Sample lists shared by the stages: the order of a genotype file, and the Phase 3 samples."""
 
 from __future__ import annotations
 
@@ -36,3 +36,15 @@ def write_sample_file(cfg: Config, vcf: Path, eid_map: pd.DataFrame, path: Path)
         return
     path.write_text(text)
     log(f"  wrote sample file: {path} ({text.count(chr(10)) - 2} samples, in VCF order)")
+
+
+def phase3_sample_ids(cfg: Config) -> set[str] | None:
+    """The sample names of the Phase 3 release, or None where its panel file is absent.
+
+    The array and imputed files are made from Phase 3, which has 2,504 samples. The EID map
+    follows the 30x panel of 3,202, so 698 participants have no array or imputed genotypes.
+    """
+    path = cfg.kg_raw_dir() / f"integrated_call_samples_v3.{cfg.kg_phase3_release_date}.ALL.panel"
+    if not path.exists():
+        return None
+    return set(pd.read_csv(path, sep="\t", usecols=["sample"])["sample"].astype(str))
