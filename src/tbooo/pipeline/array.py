@@ -199,26 +199,49 @@ def _rewrite_fam(fam_path: Path, eid_map: pd.DataFrame) -> None:
     pd.DataFrame(rows).to_csv(fam_path, sep="\t", index=False, header=False)
 
 
+def _find_genetic_map(maps_dir: Path, chrom: str) -> Path | None:
+    """The GRCh37 genetic map of exactly this chromosome, or None.
+
+    `tbooo download 1kg` unpacks the interpolated maps, one gzip file per chromosome in
+    `interpolated_OMNI/` and `interpolated_from_hapmap/`. A 1000GP Phase 3 style
+    `genetic_map_GRCh37_chr<N>.txt` is used when someone has put one there. The name is matched
+    exactly: a glob on `chr1` also finds chr10 to chr19.
+    """
+    candidates = [
+        maps_dir / "interpolated_OMNI" / f"chr{chrom}.OMNI.interpolated_genetic_map.gz",
+        maps_dir / "interpolated_from_hapmap" / f"chr{chrom}.interpolated_genetic_map.gz",
+        *maps_dir.glob(f"**/{_CM_MAP_GLOB.format(chrom=chrom)}"),
+    ]
+    return next((c for c in candidates if c.exists()), None)
+
+
+def _read_genetic_map(path: Path) -> pd.DataFrame:
+    """A genetic map as columns `pos` and `cm`, sorted by position.
+
+    The interpolated maps have three columns without a header: variant id, position, cM.
+    The Phase 3 style text maps have a header and the columns position, rate, cM.
+    """
+    if path.suffix == ".gz":
+        gmap = pd.read_csv(path, sep=r"\s+", header=None, names=["id", "pos", "cm"])
+    else:
+        gmap = pd.read_csv(path, sep=r"\s+", header=0, names=["pos", "rate", "cm"])
+    return gmap[["pos", "cm"]].sort_values("pos").reset_index(drop=True)
+
+
 def _inject_cm(cfg: Config, chrom: str, bim_path: Path) -> None:
-    """Fill BIM column 3 (cM) from 1KGP genetic maps."""
-    map_glob = _CM_MAP_GLOB.format(chrom=chrom)
-    maps_dir = cfg.reference_dir / "genetic_maps"
-    map_files = list(maps_dir.glob(f"**/*chr{chrom}*.txt"))
-    if not map_files:
+    """Fill BIM column 3 (cM) from the GRCh37 genetic map of this chromosome."""
+    map_file = _find_genetic_map(cfg.reference_dir / "genetic_maps", chrom)
+    if map_file is None:
         log(f"  WARNING: no genetic map found for chr{chrom}; cM column left as 0")
         return
 
-    gmap = pd.read_csv(map_files[0], sep=r"\s+", header=0,
-                       names=["pos", "rate", "cm"])
-    gmap = gmap.sort_values("pos")
-    positions = gmap["pos"].to_numpy()
-    cms = gmap["cm"].to_numpy()
-
+    gmap = _read_genetic_map(map_file)
     bim = pd.read_csv(bim_path, sep="\t", header=None,
                       names=["chr", "snp", "cm", "bp", "a1", "a2"])
     import numpy as np
-    bim["cm"] = np.interp(bim["bp"].to_numpy(), positions, cms)
+    bim["cm"] = np.interp(bim["bp"].to_numpy(), gmap["pos"].to_numpy(), gmap["cm"].to_numpy())
     bim.to_csv(bim_path, sep="\t", index=False, header=False)
+    log(f"  cM positions from {map_file.name}")
 
 
 def _load_eid_map(cfg: Config) -> pd.DataFrame:

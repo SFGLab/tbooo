@@ -24,6 +24,7 @@ import pyarrow.parquet as pq
 
 from tbooo.config import Config
 from tbooo.integrity import parquet_ok
+from tbooo.pipeline.samples import phase3_sample_ids
 from tbooo.utils import ensure_dirs, log
 
 # UKB Field 21000 (ethnic background) — Data-Coding 1001
@@ -81,7 +82,11 @@ def build_phenotype_table(cfg: Config) -> None:
 
     kg_path = cfg.metadata_dir() / "eid_map_1kg.tsv"
     if kg_path.exists():
-        frames.append(_build_1kg_rows(pd.read_csv(kg_path, sep="\t")))
+        phase3 = phase3_sample_ids(cfg)
+        if phase3 is None:
+            log("  WARNING: Phase 3 panel not found; array and imputed data are marked "
+                "available for every 1KGP participant")
+        frames.append(_build_1kg_rows(pd.read_csv(kg_path, sep="\t"), phase3))
 
     sgdp_path = cfg.metadata_dir() / "eid_map_sgdp.tsv"
     if sgdp_path.exists():
@@ -111,7 +116,17 @@ def build_phenotype_table(cfg: Config) -> None:
     log(f"Phenotype table written → {out} ({len(df)} rows, {len(df.columns)} columns)")
 
 
-def _build_1kg_rows(df: pd.DataFrame) -> pd.DataFrame:
+def _build_1kg_rows(df: pd.DataFrame, phase3: set[str] | None = None) -> pd.DataFrame:
+    """Rows of the 1KGP participants.
+
+    `phase3` holds the sample names of the Phase 3 release, which the array and imputed files
+    are made from. A participant outside it has neither, and was not in the PCA. None marks
+    every participant as having them, for an EID map that was itself built from Phase 3.
+    """
+    in_phase3 = (
+        df["sample_id"].astype(str).isin(phase3).astype(int) if phase3 is not None
+        else pd.Series(1, index=df.index)
+    )
     rows = pd.DataFrame()
     rows["eid"] = df["eid"].astype(int)
     rows["p31"] = df["sex"].astype(int)
@@ -119,10 +134,10 @@ def _build_1kg_rows(df: pd.DataFrame) -> pd.DataFrame:
     rows["p22006"] = (
         (df["super_pop"] == "EUR") & (df["pop"] == "GBR")
     ).astype(int)
-    rows["p22020"] = 1          # all Phase 3 unrelated samples used in PCA
+    rows["p22020"] = in_phase3  # the Phase 3 samples are the ones with array genotypes for the PCA
     rows["p22000"] = df["batch"].fillna(0).astype(int)
-    rows["p22418"] = 1          # array data available
-    rows["p22828"] = 1          # imputed data available
+    rows["p22418"] = in_phase3  # array data available
+    rows["p22828"] = in_phase3  # imputed data available
     rows["p24051"] = 1          # WGS gVCF available (DRAGEN GVCFs)
     rows["p54_i0"] = df.apply(
         lambda r: _CENTRE.get(r["pop"], _CENTRE.get(r["super_pop"], 11020)), axis=1
@@ -140,7 +155,8 @@ def _build_sgdp_rows(df: pd.DataFrame) -> pd.DataFrame:
     rows["p22000"] = 0          # no batch code
     rows["p22418"] = 0          # no array data
     rows["p22828"] = 0          # no imputed data
-    rows["p24051"] = 1          # WGS gVCF available (DRAGEN GVCFs)
+    # WGS gVCF available where the sample has a downloaded VCF
+    rows["p24051"] = df["vcf_filename"].notna().astype(int) if "vcf_filename" in df.columns else 1
     rows["p54_i0"] = df["region"].map({
         "West Eurasia": 11020,
         "Africa": 11021,

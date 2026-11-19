@@ -27,7 +27,7 @@ TBOOO produces a directory tree and file set that structurally mirrors what a UK
 ### Key design decisions
 
 - **Array + imputation** use GRCh37 coordinates, matching 1KGP Phase 3 natively (no liftover needed).
-- **WGS + WES** use GRCh38 coordinates, matching 1KGP NYGC 30x and SGDP natively.
+- **WGS + WES** use GRCh38 coordinates, the build of 1KGP NYGC 30x. The SGDP release is on GRCh37; `tbooo map sgdp38` lifts its variant records to GRCh38 for the cohort pVCF, and the per-sample SGDP files under Field 24051 stay on GRCh37.
 - **SGDP samples** supplement 1KGP in the WGS layer only, adding geographic diversity beyond 1KGP's 26 populations.
 - **GEUVADIS expression PCA** is added as a custom phenotype-like signal for the 462 1KGP samples with matched RNA-seq. It has no direct UKB field counterpart; column names use the `geuvadis_` prefix.
 - All samples are assigned synthetic 7-digit EIDs in the range 1,000,000–6,999,999, mirroring UKB pseudonymization.

@@ -18,7 +18,8 @@ from pathlib import Path
 import pandas as pd
 
 from tbooo.config import Config
-from tbooo.integrity import ensure_bgen, ensure_table
+from tbooo.integrity import ensure_bgen
+from tbooo.pipeline.samples import write_sample_file
 from tbooo.utils import ensure_dirs, log, run
 
 _GRCH37_FASTA = "GRCh37/human_g1k_v37.fasta"
@@ -29,9 +30,8 @@ def run_imputed_pipeline(cfg: Config, chroms: list[str]) -> None:
     eid_map = _load_eid_map(cfg)
     rename_file = cfg.metadata_dir() / "vcf_sample_rename_1kg.txt"
 
-    # Write sample file (shared across all chromosomes)
+    # One sample file shared by all chromosomes, written from the first VCF converted.
     sample_path = cfg.imputed_dir() / "ukb22828_samples.sample"
-    _write_sample_file(eid_map, sample_path)
 
     for chrom in chroms:
         log(f"[imputed] chromosome {chrom}")
@@ -39,7 +39,7 @@ def run_imputed_pipeline(cfg: Config, chroms: list[str]) -> None:
         if not vcf.exists():
             log(f"  SKIP: Phase 3 VCF not found: {vcf}")
             continue
-        _process_chrom(cfg, chrom, vcf, rename_file, sample_path)
+        _process_chrom(cfg, chrom, vcf, rename_file, sample_path, eid_map)
 
     log("Imputed pipeline complete.")
 
@@ -50,13 +50,14 @@ def _process_chrom(
     vcf: Path,
     rename_file: Path,
     sample_path: Path,
+    eid_map: pd.DataFrame,
 ) -> None:
     stem = cfg.imputed_stem(chrom)
     chrom_sample = Path(str(stem) + ".sample")
     ensure_bgen(
         f"{stem.name} (imputed chr{chrom})",
         stem,
-        lambda: _build_chrom(cfg, chrom, vcf, rename_file, sample_path, stem),
+        lambda: _build_chrom(cfg, chrom, vcf, rename_file, sample_path, stem, eid_map),
         extra=(chrom_sample,),
     )
 
@@ -68,6 +69,7 @@ def _build_chrom(
     rename_file: Path,
     sample_path: Path,
     stem: Path,
+    eid_map: pd.DataFrame,
 ) -> None:
     tmp_norm = cfg.tmp_dir / f"imputed_chr{chrom}_norm.vcf.gz"
     tmp_reheadered = cfg.tmp_dir / f"imputed_chr{chrom}_eid.vcf.gz"
@@ -119,8 +121,10 @@ def _build_chrom(
         "-og", str(bgen_path),
         "-ofiletype", "bgen_v1.2",
         "-bgen-bits", "8",
-        "-os", str(sample_path),
     ])
+    # The Phase 3 VCF has 2,504 samples and the EID map 3,202, so the sample file is written
+    # from the VCF's own columns, with sex from the map.
+    write_sample_file(cfg, source_vcf, eid_map, sample_path)
 
     # Step 4: index BGEN
     run([cfg.tools.bgenix, "-g", str(bgen_path), "-index"])
@@ -136,21 +140,6 @@ def _build_chrom(
     Path(str(tmp_reheadered) + ".tbi").unlink(missing_ok=True)
 
     log(f"  done → {stem}.bgen/bgi/sample")
-
-
-def _write_sample_file(eid_map: pd.DataFrame, path: Path) -> None:
-    """Write a GEN2-format .sample file for BGEN."""
-    def _build() -> None:
-        lines = ["ID_1 ID_2 missing sex\n", "0 0 0 D\n"]
-        for _, row in eid_map.iterrows():
-            eid = row["eid"]
-            sex = int(row.get("sex", 0))
-            lines.append(f"{eid} {eid} 0 {sex}\n")
-        path.write_text("".join(lines))
-        log(f"  wrote sample file: {path} ({len(eid_map)} samples)")
-
-    # header (2 lines) + at least one sample row
-    ensure_table(path.name, path, _build, min_lines=3)
 
 
 def _load_eid_map(cfg: Config) -> pd.DataFrame:

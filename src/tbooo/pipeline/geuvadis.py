@@ -58,10 +58,12 @@ def build_expression_pcs(cfg: Config) -> None:
     out_pcs = cfg.metadata_dir() / "geuvadis_expression_pcs.tsv"
     out_var = cfg.metadata_dir() / "geuvadis_pca_variance.tsv"
     if table_ok(out_pcs, min_lines=2) and table_ok(out_var, min_lines=2):
-        # PCA already computed and intact — skip the expensive recompute.
-        # (The parquet patch below only applies if participant.parquet already
-        # exists; in a full run geuvadis precedes phenotypes, so it is a no-op here.)
+        # PCA already computed and intact — skip the expensive recompute. The saved
+        # scores still go into participant.parquet, which may have been built or
+        # rebuilt since they were written.
         log(f"  skip (valid): {out_pcs.name} + {out_var.name}")
+        saved = pd.read_csv(out_pcs, sep="\t")
+        _patch_parquet(cfg, saved, [c for c in saved.columns if c != "eid"])
         return
 
     log("Loading GEUVADIS RPKM matrix…")

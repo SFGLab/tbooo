@@ -13,6 +13,7 @@ Usage:
     tbooo map imputed         Build UKB-mirrored BGEN imputed files (Field 22828)
     tbooo map wgs             Build UKB-mirrored WGS gVCFs + pVCF (Field 24051/24310)
     tbooo map wes             Build UKB-mirrored WES PLINK/BGEN files (Field 23158/23159)
+    tbooo map sgdp38          Lift the SGDP variant records to GRCh38 and phase them
     tbooo map geuvadis        Compute expression PCA and add geuvadis_pc* to participant.parquet
     tbooo map mage            Compute MAGE expression PCA and add mage_pc* columns
     tbooo map gtex            Assign GTEx EIDs (3,000,000+) and append gtex_pc* rows
@@ -186,6 +187,16 @@ def map_wgs(config, chroms, do_gvcf, do_pvcf):
         build_gvcfs(cfg, chrom_list)
     if do_pvcf:
         build_pvcf(cfg, chrom_list)
+
+
+@map.command("sgdp38")
+@CONFIG_OPTION
+@click.option("--chroms", default=None, help="Comma-separated chromosomes")
+def map_sgdp38(config, chroms):
+    """Lift the SGDP variant records to GRCh38 and phase them against the 30x panel."""
+    from tbooo.pipeline.sgdp38 import build_sgdp_grch38
+    cfg = _cfg(config)
+    build_sgdp_grch38(cfg, chroms.split(",") if chroms else [str(a) for a in cfg.autosomes])
 
 
 @map.command("wes")

@@ -113,13 +113,27 @@ ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/ALL.chr22.phase3_shape
 
 **NYGC 30x — per-chromosome phased VCFs (GRCh38):**
 
+TBOOO downloads the panel of 2022-04-22, in which the structural variants are phased together
+with the SNVs and indels (`kg_nygc_panel: snv_indel_sv`, the default):
+
 ```
-CCDG_14151_B01_GRM_WGS_2020-08-05_chr{N}.filtered.shapeit2-duohmm-phased.vcf.gz
+1kGP_high_coverage_Illumina.chr{N}.filtered.SNV_INDEL_SV_phased_panel.vcf.gz
+1kGP_high_coverage_Illumina.chrX.filtered.SNV_INDEL_SV_phased_panel.v2.vcf.gz
 ```
 
 Example full path (EBI):
 ```
-http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased/CCDG_14151_B01_GRM_WGS_2020-08-05_chr22.filtered.shapeit2-duohmm-phased.vcf.gz
+https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20220422_3202_phased_SNV_INDEL_SV/1kGP_high_coverage_Illumina.chr22.filtered.SNV_INDEL_SV_phased_panel.vcf.gz
+```
+
+Structural variants appear as symbolic alleles (`<DEL>`, `<INS>`, `<DUP>`, `<INV>`) with `SVTYPE`
+and `END` in INFO. The exome stage drops them, since PLINK and BGEN have no place for them.
+
+The panel of 2020-10-28 has SNVs and indels only. Set `kg_nygc_panel: snv_indel` and point
+`kg_nygc_base_url` at `.../working/20201028_3202_phased` to use it:
+
+```
+CCDG_14151_B01_GRM_WGS_2020-08-05_chr{N}.filtered.shapeit2-duohmm-phased.vcf.gz
 ```
 
 ### 1.6 CRAM/BAM Alignment Files

@@ -17,7 +17,9 @@ from tbooo.config import Config
 from tbooo.utils import log
 
 # All recognised target names for --target
-TARGETS = ("array", "imputed", "wes", "wgs", "geuvadis", "phenotypes", "qc")
+# The full run does the first seven. mage, gtex and eda run when named: the first two need
+# downloads the full run does not make, and each adds to the participant table in place.
+TARGETS = ("array", "imputed", "wes", "wgs", "geuvadis", "phenotypes", "qc", "mage", "gtex", "eda")
 
 
 def run(
@@ -110,5 +112,19 @@ def run(
     if target in (None, "qc"):
         from tbooo.pipeline.qc import build_qc_files
         step("map qc", build_qc_files, cfg)
+
+    # ── Named only: MAGE, GTEx, EDA ────────────────────────────────────────────
+    if target == "mage":
+        from tbooo.pipeline.mage import build_expression_pcs as build_mage_pcs
+        step("map mage", build_mage_pcs, cfg)
+    if target == "gtex":
+        from tbooo.pipeline.gtex import build_expression_pcs as build_gtex_pcs
+        step("map gtex", build_gtex_pcs, cfg)
+    if target == "eda":
+        from tbooo.pipeline.eda import run_eda
+        step("map eda", run_eda, cfg)
+
+    if target is not None and target not in TARGETS:
+        raise ValueError(f"unknown target {target!r}; expected one of {', '.join(TARGETS)}")
 
     log("Pipeline complete." if not dry_run else "Dry-run complete.")

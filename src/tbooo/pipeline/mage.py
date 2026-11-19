@@ -57,7 +57,11 @@ def build_expression_pcs(cfg: Config) -> None:
     ensure_dirs(cfg.metadata_dir())
     out_pcs = cfg.metadata_dir() / "mage_expression_pcs.tsv"
     if table_ok(out_pcs, min_lines=2):
+        # The saved scores still go into participant.parquet, which may have been
+        # built or rebuilt since they were written.
         log(f"  skip (valid): {out_pcs.name}")
+        saved = pd.read_csv(out_pcs, sep="\t")
+        _patch_parquet(cfg, saved, [c for c in saved.columns if c != "eid"])
         return
 
     log("Loading MAGE expression matrix…")
